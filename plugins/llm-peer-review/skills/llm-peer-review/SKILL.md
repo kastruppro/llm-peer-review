@@ -1,283 +1,143 @@
 ---
 name: llm-peer-review
 description: >-
-  Kør tre uafhængige, parallelle code reviews med modeller fra Anthropic,
-  Google og OpenAI, klassificér hvert output og aggregér kun gyldige stemmer
-  til en evidensbaseret konsensus. Brug når brugeren beder om triple review,
-  tre-LLM review, en grundig pre-merge audit af en hel kodebase eller en
-  uafhængig multi-model vurdering før eventuelle rettelser.
+  Kør tre uafhængige, parallelle LLM-reviews (Claude, Gemini, Codex) af et diff,
+  en branch eller hele kodebasen, valider hvert svar mod et JSON-skema, og
+  aggregér kun gyldige stemmer til en evidensbaseret konsensus. Brug når
+  brugeren beder om triple review, tre-LLM review, diff- eller branch-review,
+  adversarial review, en grundig pre-merge audit eller en uafhængig
+  multi-model vurdering før eventuelle rettelser.
 ---
 
-# Triple review
+# LLM peer review
 
-Kør Claude CLI, Gemini via Antigravity CLI (`agy`) og native Codex CLI mod det
-samme stabile snapshot. Vent på alle tre, verificér outputtene, og aggregér først
-derefter findings.
+Tre reviewere (Claude CLI, Gemini via Antigravity CLI `agy`, native Codex CLI)
+læser det samme stabile snapshot og returnerer JSON efter
+`schemas/review-output.schema.json`. `scripts/run-review.sh` er det eneste
+indgangspunkt: preflight, scope, parallel kørsel, watcher, read-only-kontrol,
+klassifikation og aggregering. Launch-flag og modeller står kun i scripts og
+`scripts/models.json`; opfind aldrig egne kald.
 
-## Ufravigelige regler
+## 1. Ufravigelige regler
 
 1. Ændr ikke projektfiler, git-state eller instruktioner, mens reviewerne kører.
-2. Giv alle tre stemmer samme scope og samme kerneprompt.
-3. Tæl kun `VALID` eller `CLEAN` som en stemme. Tavshed og fejl er ikke enighed.
+2. Giv alle stemmer samme scope og samme kerneprompt.
+3. Kun schema-gyldige `VALID`/`CLEAN` tæller som stemme. Tavshed og fejl er ikke enighed.
 4. Verificér single-reviewer findings direkte i kildekoden før de accepteres.
-5. Ret kun kode efter aggregering, og kun hvis brugerens opgave autoriserer fixes.
-6. Kør alle reviewere read-only. Gemini har kun prompt-baseret read-only, så
-   sammenlign indholdsmanifest før og efter reviewerne.
+5. Ret kun kode efter aggregering, og kun hvis brugeren vælger det (regel 7).
+6. Reviewerne er read-only. Gemini har kun workflow-baseret read-only, så
+   indholdsmanifestet før/efter (exit `4`) er obligatorisk.
+7. Efter rapporten: STOP og spørg brugeren, hvilke findings der skal rettes.
+   Ret aldrig automatisk, heller ikke når rettelsen er oplagt.
 
-Brug ikke denne skill til små diffs, lint/style eller en kodebase, der aktivt
-ændres. En enkelt reviewer eller projektets normale review-flow er billigere dér.
+Brug ikke skill'en til små diffs, lint/style eller en kodebase, der aktivt
+ændres. En enkelt reviewer er billigere dér.
 
-## Ressourcer
+## 2. Vælg scope og mode
 
-- `scripts/snapshot.py`: hash reviewets tracked/untracked filer og Git-tilstand; kræver Python 3.
-- `scripts/models.json`: kanonisk modelvalg for alle tre familier.
-- `scripts/models.sh`: resolv modeller og reasoning uden hardcodede strenge.
-- `scripts/resolve-codex.py`: vælg og versionskontrollér en installeret Codex CLI.
-- `scripts/guard-review-model.sh`: Claude Code PreToolUse-guard mod stale/hardcodede Claude-modeller; kun aktiv hvor hooket er registreret.
-- `scripts/gemini-review.sh`: valider og kør Gemini-stemmen med retry.
-- `scripts/extract-agy-response.sh`: udtræk kun AGY-envelopeens endelige svar.
-- `scripts/extract-review-output.sh`: udtræk slutstemmer efter indhold, aldrig suffix.
-- `scripts/classify-review.sh`: returnér `VALID`, `CLEAN`, `MISFIRE`,
-  `CAPACITY`, `REFUSED`, `ERROR`, `WEAK`, `EMPTY` eller `MISSING`.
-- `scripts/test-*.sh`: regressionstest extraction, location, retry og precedence.
-- `scripts/wait-for-reviewers.sh`: poll alle tre PIDs og verdict alle outputs.
-- [references/hardening.md](references/hardening.md): CLI-isolation og rationale.
-- [references/troubleshooting.md](references/troubleshooting.md): verdicts og fejl.
+Default er `--scope auto`: dirty arbejdstræ giver `working-tree`, ellers
+branch-diff mod default branch; uden Git bliver det `full`.
 
-Sæt `SKILL_DIR` til den absolutte mappe, der indeholder denne `SKILL.md`.
-Kør trin 2-6 i den samme vedvarende shellsession; variabler og PIDs overlever
-ikke mellem uafhængige engangskald.
+| Brugeren vil | Flags |
+|---|---|
+| review af det jeg har ændret / "review" uden mere | ingen (`auto`) |
+| kun ucommittede ændringer | `--scope working-tree` |
+| hele branchen / PR mod en bestemt base | `--scope branch --base <ref>` |
+| hele kodebasen, pre-merge audit | `--scope full` |
+| udfordr design og antagelser | `--adversarial` |
+| styr opmærksomheden | `--focus "tekst"` (ét quoted argument, aldrig delt op) |
+| kun nogle stemmer | `--voices claude,codex` |
 
-## 1. Kontrollér scope og snapshot
+Mangler repoet `origin/HEAD` og `main`/`master`/`trunk`, fejler `auto` på et
+rent træ med besked om `--base` eller `--scope full`. Vælg da en af dem.
 
-Kør fra projektroden og registrér status uden at ændre den:
+## 3. Kør
 
-```bash
-PROJECT_ROOT="$(pwd -P)"
-git status --short
-git rev-parse --verify HEAD 2>/dev/null || true
-```
-
-En dirty worktree er tilladt, hvis den er den tilsigtede review-snapshot. Gem
-et indholdsmanifest og sammenlign det efter alle reviewere. Stash, commit eller formatér ikke.
-
-## 2. Preflight og modeller
+`SKILL_DIR` er den absolutte mappe med denne `SKILL.md`; `PROJECT_ROOT` er
+`pwd -P` for projektet (stier med mellemrum er understøttet, quote altid):
 
 ```bash
-SCRIPTS="$SKILL_DIR/scripts"
-command -v claude
-command -v agy
-command -v jq
-command -v python3
-"$SCRIPTS/models.sh" check
-
-CLAUDE_MODEL="$("$SCRIPTS/models.sh" claude)"
-CLAUDE_EFFORT="$("$SCRIPTS/models.sh" claude effort)"
-GEMINI_MODEL="$("$SCRIPTS/models.sh" gemini)"
-CODEX_MODEL="$("$SCRIPTS/models.sh" codex)"
-CODEX_EFFORT="$("$SCRIPTS/models.sh" codex effort)"
-CODEX_BIN="$(python3 "$SCRIPTS/resolve-codex.py")" || exit 1
+bash "$SKILL_DIR/scripts/run-review.sh" --root "$PROJECT_ROOT" [flags]
 ```
 
-`resolve-codex.py` vælger den nyeste installerede stabile CLI fra absolutte
-PATH-mapper, `/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin` og
-Codex/ChatGPT-apps i `~/Applications` og `/Applications`. Ved npm-installationer
-undersøges også pakkens native binær, så en begrænset app/launchd-PATH uden
-`node` ikke tvinger et forkert CLI-valg. Versionen skal opfylde
-`codex.min_cli_version` i modelregistret. Grænsen er den lokalt verificerede
-version, ikke en påstået officiel minimumsversion. Helperen kører kun
-`--version`; kontoens modeladgang afgøres stadig ved reviewet.
+- **Claude Code:** `Bash` med `run_in_background: true` og `timeout: 2400000`.
+  Fortæl brugeren, at reviewet kører (watcherens grænse er 35 min), og rør ikke projektet.
+  Læs resultatet, når baggrundskørslen melder færdig.
+- **Codex:** kør i forgrunden med lang yield; send korte statusbeskeder.
 
-Brug altid den returnerede absolutte `CODEX_BIN`, aldrig blot `codex exec`
-eller en husket sti. Hvis ingen installeret CLI består kontrollen, skal en
-[vedvarende CLI-opdatering](references/troubleshooting.md#for-gammel-codex-cli)
-løse det; brug ikke en midlertidig npm-installation som standard-workaround.
-Et eksplicit valg kan sættes med `PEERREVIEW_CODEX_BIN=/absolut/sti/codex`;
-hvis det valg ikke består kontrollen, stopper preflight uden fallback.
-Kør ikke nogen reviewer, før preflight lykkes.
+Første stdout-linje er `REVIEW_DIR=<sti>`; senere kommer `TARGET=…`, verdicts og
+`AGGREGATE=<sti>/aggregate.md`. Scriptet sletter aldrig run-mappen.
 
-Stop højlydt, hvis en CLI eller model ikke er tilgængelig. Gæt aldrig en
-erstatningsmodel. En manglende familie må enten relaunches eller markeres som
-manglende i slutrapporten.
+| Exit | Betydning | Handling |
+|---|---|---|
+| `0` | alle valgte stemmer `VALID`/`CLEAN` | gå til §5 |
+| `1` | mindst én stemme mangler/er ugyldig; `aggregate.md` findes | §4, derefter §5 |
+| `2` | preflight, wiring, watcher-fejl eller timeout; ingen aggregering | læs stderr, ret årsagen ([troubleshooting](references/troubleshooting.md)) |
+| `3` | intet at reviewe | foreslå `--scope full` eller `--base <ref>` |
+| `4` | projektet ændrede sig under kørslen; ingen aggregering | find årsagen, kør alle stemmer igen på et stabilt snapshot |
+| `130`/`143` | afbrudt; stemmerne er stoppet | spørg brugeren, om der skal køres igen |
 
-## 3. Opret privat run-mappe
+Watcher-grænser kan justeres med `REVIEW_POLL_INTERVAL`, `REVIEW_MAX_ITER` og
+`REVIEW_STALE_ITERS` (se headeren i `run-review.sh`).
 
-Brug en ikke-forudsigelig, kun-bruger-læsbar mappe. Dette undgår RID-kollisioner
-og symlink-angreb mod forudsigelige `/tmp/review_*`-filer.
+## 4. Ved manglende voice
+
+Læs `verdicts.txt` i run-mappen og fejlårsagen i stemmens `.err` (se
+[troubleshooting](references/troubleshooting.md)). Relaunch højst én gang pr.
+stemme, med samme scope/`--base`/`--focus`/`--adversarial` og kun den manglende
+voice. Det giver en ny run-mappe:
 
 ```bash
-umask 077
-REVIEW_DIR="$(mktemp -d "${TMPDIR:-/tmp}/llm-peer-review.XXXXXX")"
-REVIEW_RUN_ID="$(basename "$REVIEW_DIR")"
-export REVIEW_DIR
-touch "$REVIEW_DIR/.llm-peer-review-owned"
-python3 "$SCRIPTS/snapshot.py" "$PROJECT_ROOT" > "$REVIEW_DIR/snapshot.before.json"
-printf 'REVIEW_DIR=%s\nREVIEW_RUN_ID=%s\n' "$REVIEW_DIR" "$REVIEW_RUN_ID"
+bash "$SKILL_DIR/scripts/run-review.sh" --root "$PROJECT_ROOT" --voices gemini [samme flags]
 ```
 
-Genbrug aldrig en run-mappe. Gem dens absolutte sti i statusopdateringerne.
-
-## 4. Definér én fælles prompt
-
-Tilpas kun domænelisten, hvis brugeren bad om et specifikt auditfokus. Bevar
-scope, outputkontrakt og read-only-instruksen identisk for alle tre stemmer.
+Kræv derefter, at projektet var uændret mellem de to runs, og aggregér på tværs
+(`OLD`/`NEW` er de to `REVIEW_DIR`, `*_RID` er mappernes basename):
 
 ```bash
-REVIEW_PROMPT='Review every tracked or non-ignored untracked source file under the current project directory (in a non-Git directory, review source files except .git internals) for concrete correctness bugs, race conditions, lock-ordering problems, security issues, non-atomic file operations, crashes, and invariant violations. Ignore style and naming. Do not modify, create, delete, format, stage, or commit files. For every finding use these plain-text labels on separate lines: Severity: (P0-P3), Location: (file:line), Behavior: (faulty behavior), Impact: (concrete consequence), Fix: (concrete correction). One well-supported finding is sufficient. Output findings only. End with CHECKED: followed by the files or areas actually reviewed. If there are no findings, also output NO_FINDINGS.'
+diff -u "$OLD/snapshot.before.json" "$NEW/snapshot.before.json" \
+  && python3 -I "$SKILL_DIR/scripts/review_json.py" aggregate --root "$PROJECT_ROOT" \
+       claude="$OLD/review_claude_$OLD_RID.json" \
+       gemini="$NEW/review_gemini_$NEW_RID.json" \
+       codex="$OLD/review_codex_$OLD_RID.last.md"
 ```
 
-## 5. Launch de tre stemmer parallelt
+Ikke-tom diff betyder, at runs ikke kan blandes: kør alle stemmer igen. En
+stemme, der stadig ikke er gyldig efter ét relaunch, står som manglende (en
+fil, der ikke findes, giver `MANGLER (MISSING)`). Erstat aldrig familien med en
+anden model.
 
-Kør hele blokken i én langvarig terminalsession med kort initial yield. Behold
-session-id'et og poll den, så brugeren fortsat får status.
+## 5. Verificér
 
-### Claude
+Læs hver klynge i `aggregate.md` mod kildekoden, ikke kun beskrivelsen.
 
-```bash
-CLAUDE_CODE_DISABLE_CLAUDE_MDS=1 claude -p \
-  --model "$CLAUDE_MODEL" \
-  --effort "$CLAUDE_EFFORT" \
-  --setting-sources user \
-  --tools "Read,Glob,Grep" \
-  --disallowedTools "Agent" "Task" \
-  --permission-mode dontAsk \
-  --system-prompt "You are one standalone code reviewer, not an orchestrator. Read the code yourself. Never launch agents or other reviewers. Never modify files. Return only concrete review findings with file:line evidence." \
-  --output-format json \
-  "$REVIEW_PROMPT" \
-  </dev/null \
-  > "$REVIEW_DIR/review_claude_${REVIEW_RUN_ID}.json" \
-  2> "$REVIEW_DIR/review_claude_${REVIEW_RUN_ID}.err" &
-CLAUDE_PID=$!
-```
+- Klynger med flere stemmer: konsensus, men bekræft stadig stedet.
+- Klynger med én stemme: bekræft eller afvis med konkret evidens (kode, kald, test).
+- Semantisk ens klynger, som scriptet ikke slog sammen (andre linjer/ordlyd), flettes.
+- `CLEAN` er en gyldig nul-finding-stemme, ikke en finding.
 
-### Gemini
+## 6. Rapportér
 
-```bash
-GEMINI_REVIEW_MODEL="$GEMINI_MODEL" \
-  "$SCRIPTS/gemini-review.sh" \
-  "$REVIEW_RUN_ID" "$REVIEW_PROMPT" "$PROJECT_ROOT" &
-GEMINI_PID=$!
-```
+Skriv `CODE_REVIEW_<YYYY-MM-DD>_<agent>_<model>.md` i projektroden. Agent og
+model er orkestratorens egne, med små bogstaver, mellemrum erstattet af `_` og
+versionspunktummer bevaret (fx `CODE_REVIEW_2026-10-24_claude_opus_5.5.md`).
 
-`agy` har intet tool-level read-only flag. Wrapperen prepender read-only-
-instruktionen og klassificerer output, men indholdskontrollen er stadig
-obligatorisk.
+- Manglende voices øverst: familie, sidste verdict og årsag; skriv at tilliden er lavere.
+- Findings først, sorteret efter severity (critical, high, medium, low), med
+  disposition (accepteret/afvist) og evidens.
+- `file:line` ordret som reviewerne rapporterede, og bevar markeringer af
+  inferens, usikkerhed og åbne spørgsmål. Ingen nye findings uden kilde.
+- Ingen findings: sig det eksplicit og hold restrisiko kort.
 
-Standardgrænsen er 15 minutter pr. Gemini-forsøg, med højst ét retry.
-Sæt `GEMINI_ATTEMPT_CAP` i sekunder for et andet reviewomfang. Watcherens
-standardgrænse er 35 minutter, så begge forsøg har tid til at afslutte.
-Ved en længere forsøgsgrænse skal `REVIEW_MAX_ITER` også give plads til begge
-forsøg plus opstart og oprydning (`REVIEW_POLL_INTERVAL` er normalt 10 sekunder).
+Gentag indholdet i svaret og STOP derefter. Spørg, hvilke findings der skal
+rettes (AskUserQuestion i Claude Code; ellers en direkte spørgsmålsbesked).
+Rør ingen filer, før brugeren har svaret.
 
-Wrapperen gemmer hver rå JSON-envelope og klassificerer kun dens udtrukne
-`.response`. Brug aldrig intern AGY-dialog som reviewerens stemme.
+## 7. Ryd op
 
-### Codex
-
-Pin både model og reasoning fra `models.json`. `--ignore-user-config` fjerner
-personlige plugins/MCP-indstillinger, og `project_doc_max_bytes=0` forhindrer
-global eller projektlokal `AGENTS.md` i at frame revieweren som orchestrator.
-
-```bash
-"$CODEX_BIN" exec \
-  --ignore-user-config \
-  --model "$CODEX_MODEL" \
-  -c "model_reasoning_effort=\"$CODEX_EFFORT\"" \
-  -c project_doc_max_bytes=0 \
-  --sandbox read-only \
-  --skip-git-repo-check \
-  --cd "$PROJECT_ROOT" \
-  --color never \
-  --output-last-message "$REVIEW_DIR/review_codex_${REVIEW_RUN_ID}.last.md" \
-  "$REVIEW_PROMPT" \
-  </dev/null \
-  > "$REVIEW_DIR/review_codex_${REVIEW_RUN_ID}.out" \
-  2> "$REVIEW_DIR/review_codex_${REVIEW_RUN_ID}.err" &
-CODEX_PID=$!
-```
-
-## 6. Vent uden at editere
-
-```bash
-if "$SCRIPTS/wait-for-reviewers.sh" "$REVIEW_RUN_ID" \
-  "$CLAUDE_PID" "$CODEX_PID" "$GEMINI_PID"; then
-  WATCH_RC=0
-else
-  WATCH_RC=$?
-fi
-printf 'watcher exit=%s\n' "$WATCH_RC"
-```
-
-Mens blokken kører: send korte statusopdateringer, men udfør ingen kommandoer,
-der kan ændre projektet. Watcher exit `1` betyder mindst én ikke-gyldig stemme;
-det betyder ikke nødvendigvis, at de andre output er ubrugelige.
-
-## 7. Kontrollér read-only-invarianten
-
-```bash
-python3 "$SCRIPTS/snapshot.py" "$PROJECT_ROOT" > "$REVIEW_DIR/snapshot.after.json"
-diff -u "$REVIEW_DIR/snapshot.before.json" "$REVIEW_DIR/snapshot.after.json"
-```
-
-Begge snapshot-kald skal lykkes. Exit `0` og tom diff bekræfter samme filindhold, filtilstand og Git-tilstand ved de to målepunkter. Det er efterkontrol, ikke skrivebeskyttelse; en ændring som gendannes under kørslen kan ikke opdages. Manifestet omfatter tracked og ikke-ignorerede untracked filer. Ignorerede filer er uden for reviewets scope. I en mappe uden Git medtages alle filer undtagen `.git`. Placér run-mappen uden for projektroden. Hvis diffen viser ændringer,
-stop aggregeringen, identificér årsagen og kør alle tre igen på et stabilt
-snapshot.
-
-## 8. Klassificér og ekstrahér
-
-```bash
-CF="$REVIEW_DIR/review_claude_${REVIEW_RUN_ID}.json"
-GF="$REVIEW_DIR/review_gemini_${REVIEW_RUN_ID}.json"
-XF="$REVIEW_DIR/review_codex_${REVIEW_RUN_ID}.last.md"
-
-CEF="$REVIEW_DIR/review_claude_${REVIEW_RUN_ID}.extracted.md"
-GEF="$REVIEW_DIR/review_gemini_${REVIEW_RUN_ID}.extracted.md"
-XEF="$REVIEW_DIR/review_codex_${REVIEW_RUN_ID}.extracted.md"
-
-"$SCRIPTS/extract-review-output.sh" "$CF" > "$CEF"
-"$SCRIPTS/extract-review-output.sh" "$GF" > "$GEF"
-"$SCRIPTS/extract-review-output.sh" "$XF" > "$XEF"
-
-for f in "$CEF" "$GEF" "$XEF"; do
-  printf '%s => ' "$(basename "$f")"
-  "$SCRIPTS/classify-review.sh" "$f"
-done
-
-cat "$CEF"
-cat "$GEF"
-cat "$XEF"
-```
-
-Udled aldrig formatet fra filendelsen. Gemini-stemmens historiske `.json`-fil
-er publiceret Markdown; helperen afgør formatet fra indholdet og afviser reelle
-fejl-envelopes. Brug de tre `*.extracted.md`-filer ved aggregeringen.
-
-Kun `VALID` og `CLEAN` tæller. Ved `MISFIRE`, `CAPACITY`, `REFUSED`, `ERROR`,
-`WEAK`, `EMPTY` eller `MISSING`: følg
-[references/troubleshooting.md](references/troubleshooting.md), relaunch højst
-én gang med en ny privat run-mappe, og markér derefter stemmen som manglende.
-
-## 9. Aggregér uden at opfinde konsensus
-
-Byg tabellen direkte fra de gyldige `*.extracted.md`-outputs:
-
-| # | Finding | Severity | Evidens | Stemmer | Disposition |
-|---|---|---|---|---|---|
-| 1 | Kort problem | high | `path/file.swift:42` | Claude, Codex | accept |
-
-- To eller tre uafhængige stemmer: konsensusfinding, men verificér stadig linjen.
-- Én stemme: læs den citerede kode og bekræft eller afvis med konkret evidens.
-- `CLEAN`: gyldig stemme med nul findings, ikke en finding i sig selv.
-- Manglende stemme: skriv familie, verdict og årsag øverst; sænk tilliden.
-- Sammenlæg semantisk samme issue, selv når linjenumre eller formulering varierer.
-
-Returnér rapporten i svaret. Skriv kun en rapportfil eller ret kode, hvis brugeren
-bad om det. Hvis fixes er autoriseret, begynd først efter denne aggregering.
-
-## 10. Ryd run-filer op
-
-Ryd kun den mappe, som dette flow selv oprettede, og først når de nødvendige rå
-outputs er ekstraheret eller gemt efter brugerens ønske:
+Run-mappen ligger uden for projektet. Ryd kun mappen, dette flow selv oprettede,
+og først når rapporten er skrevet (og eventuelle rå outputs er gemt efter
+brugerens ønske):
 
 ```bash
 if [ -f "$REVIEW_DIR/.llm-peer-review-owned" ]; then
@@ -286,3 +146,12 @@ else
   echo "Refusing cleanup: ownership marker missing: $REVIEW_DIR" >&2
 fi
 ```
+
+## Ressourcer
+
+- `scripts/run-review.sh`: indgangspunkt, flags, exitkoder, run-mappens layout.
+- `scripts/review_json.py`, `scripts/classify-review.sh`: schema-validering, verdicts, aggregering.
+- `scripts/models.json`: eneste sted med modelnavne.
+- `prompts/review.md`, `prompts/adversarial-review.md`: reviewer-prompts (engelsk).
+- [references/hardening.md](references/hardening.md): isolation, målt CLI-adfærd, rationale.
+- [references/troubleshooting.md](references/troubleshooting.md): verdicts og fejl.

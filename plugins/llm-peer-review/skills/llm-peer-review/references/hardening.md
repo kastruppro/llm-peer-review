@@ -1,80 +1,113 @@
 # Reviewer hardening
 
+Launch-flagene for alle tre stemmer står udelukkende i `scripts/run-review.sh`
+(Claude, Codex) og `scripts/gemini-review.sh` (Gemini). Se dem dér; denne fil
+forklarer hvorfor, og hvad der er målt.
+
 ## Indhold
 
 - Fælles isolation
+- Outputkontrakt (schema)
 - Claude
 - Gemini
 - Codex
-- Outputkontrakt
 - Verificeret CLI-adfærd 2026-10-24
 
 ## Fælles isolation
 
-Brug samme projektrod, scope og prompt til alle tre stemmer. Kør fra et stabilt
-snapshot og brug en privat `mktemp`-mappe med `umask 077`. Hold stdout, stderr og
-last-message adskilt. Genbrug aldrig outputstier på tværs af runs.
+Alle stemmer får samme projektrod, scope og prompt. `run-review.sh` opretter en
+privat `mktemp`-mappe (`llm-peer-review.XXXXXX`, `umask 077`) uden for projektet
+og afviser en run-mappe inde i projektroden. Stdout, stderr og last-message
+holdes adskilt, og outputstier genbruges aldrig på tværs af runs.
 
-Modeller skal altid resolves fra `scripts/models.json` gennem `models.sh`.
-Hardcodede modelnavne i launch-kommandoer bliver hurtigt stale og kan stille
-fjerne en familie fra konsensus.
+Diff og prompt ligger i `shared/` i run-mappen (`target.diff`, `prompt.md`).
+Kun `shared/` gives til reviewerne som ekstra læsbar mappe, aldrig hele
+run-mappen.
+
+Read-only er en invariant, som scriptet tjekker: `snapshot.py` tager et
+indholdsmanifest (tracked og ikke-ignorerede untracked filer, filtilstand og
+Git-tilstand) før og efter. En forskel giver exit `4` og ingen aggregering. Det
+er en efterkontrol, ikke skrivebeskyttelse; en ændring som gendannes under
+kørslen kan ikke opdages. Ignorerede filer er uden for scope.
+
+Modeller resolves altid fra `scripts/models.json` gennem `models.sh`.
+Hardcodede modelnavne bliver hurtigt stale og kan stille fjerne en familie fra
+konsensus. Ingen andre filer må indeholde modelnavne.
+
+## Outputkontrakt (schema)
+
+Alle tre stemmer skal returnere JSON efter `schemas/review-output.schema.json`
+(`verdict`, `summary`, `findings`, `checked`, `next_steps`). Klassifikationen
+afgøres af skemaet, ikke af tekstmønstre:
+
+- `VALID`: skema-gyldigt med mindst én finding.
+- `CLEAN`: skema-gyldigt, `verdict` `approve`, nul findings og ikke-tom `checked`.
+- `WEAK`: ikke skema-gyldigt JSON (eller `needs-attention` uden findings).
+- `ERROR`: CLI- eller envelope-fejl.
+
+En enkelt ```` ```json ````-fence om objektet accepteres. Regexes bruges kun til
+at genkende fejl-, afvisnings- og orchestrator-roleplay-tekster, der slet ikke
+er JSON (`CAPACITY`, `REFUSED`, `MISFIRE`). Schemaet har bevidst ingen
+`$schema`-nøgle (se den målte adfærd nedenfor).
 
 ## Claude
 
-- Sæt `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1` for at undgå projektets Claude-memory.
-- Tillad kun `Read,Glob,Grep` og forbyd `Agent` og `Task`.
-- Brug `--permission-mode dontAsk`, ikke bypass.
-- Erstat systemprompten med en single-reviewer-kontrakt.
+- `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1` undgår projektets Claude-memory;
+  `--setting-sources user` undgår projekt- og lokale settings.
+- Kun `Read,Glob,Grep`; `Agent` og `Task` er forbudt.
+- `--permission-mode dontAsk`, aldrig bypass.
+- Systemprompten erstattes af en single-reviewer-kontrakt, så revieweren ikke
+  tror, den er orkestrator.
+- Skemaet gives med `--json-schema`; resultatet læses fra `.structured_output`.
+- `--add-dir` gives kun til `shared/`, så diffen kan læses uden for cwd.
 - Quote modelstrengen; modelnavne kan indeholde shell-globtegn.
-- Hold JSON-envelope på stdout og diagnostik på stderr.
+- JSON-envelope på stdout og diagnostik på stderr.
 
 ## Gemini
 
-`agy` har ikke et tool-level read-only flag. `gemini-review.sh` prepender en
-read-only single-reviewer-prompt, validerer at modellen tilhører Gemini-familien,
-kontrollerer modelnavnet mod `agy models`, sætter timeout og retry'er én gang.
-Kør AGY med `--output-format json`, gem hver rå envelope, udtræk `.response`, og
-klassificér kun det udtrukne slutsvar. Intern dialog og tool-events må aldrig
-afgive en reviewer-stemme.
+`agy` har ikke et tool-level read-only flag, og `--dangerously-skip-permissions`
+er nødvendigt for headless drift. Read-only er derfor et workflow, ikke en
+teknisk skriveblokering. `gemini-review.sh`:
 
-`--dangerously-skip-permissions` er nødvendigt for headless drift, men betyder,
-at prompten kun instruerer read-only, mens indholdsmanifestet opdager vedvarende ændringer efter kørslen; det er ikke en teknisk skriveblokering. Hvis Gemini
-ændrer projektet, er hele review-snapshotet ugyldigt.
+- prepender en read-only single-reviewer-prompt;
+- validerer, at modellen er et `gemini-*` ID, og kontrollerer det mod `agy models`;
+- kører `agy` med `--mode plan --sandbox --dangerously-skip-permissions`
+  (variant d nedenfor), og **uden** `--disable-slash-commands`, som stille
+  deaktiverer plan-mode;
+- giver `--output-format json` og `--json-schema`, gemmer hver rå envelope og
+  klassificerer kun det udtrukne slutsvar (`.structured_output`, ellers `.response`);
+- retry'er højst én gang; ved `REFUSED` genformuleres prompten neutralt;
+- sætter en timeout pr. forsøg (`GEMINI_ATTEMPT_CAP`, standard 900 s).
 
-Det publicerede Gemini-output er markdown trods det historiske `.json`-suffix.
-Brug aldrig `jq` på denne fil. Brug kun `jq` på de bevarede `*.raw.json`-
-envelopes ved diagnostik.
+**`--add-dir`-rækkefølge:** AGY skriver relative stier i den **sidste**
+`--add-dir`. Projektmappen (cwd) skal derfor altid være sidst, så en skrivning
+havner i det manifest-kontrollerede træ. Run-mappen gives aldrig som
+`--add-dir`; kun `shared/` gives, før projektet.
 
-Ved slut-gaten skal alle tre publicerede stemmer gå gennem
-`extract-review-output.sh`. Helperen afgør formatet fra indholdet: kendte
-Claude/AGY-envelopes udtrækkes, mens Gemini/Codex-Markdown videresendes uændret.
-Filendelsen må aldrig styre extraction.
+Hvis Gemini ændrer projektet, er hele review-snapshotet ugyldigt (exit `4`).
+Intern AGY-dialog og tool-events må aldrig afgive en reviewer-stemme.
+`status: "SUCCESS"` og exit 0 beviser ikke et svar; en tom `.response` eller
+ikke-tomme `denied_actions` er en fejl.
 
 ## Codex
 
-Brug den lokalt verificerede native CLI-form:
+Den lokalt verificerede native CLI-form (flagene står i `run-review.sh`):
 
-- `--ignore-user-config` for at undgå plugins, MCP og personlige defaults;
+- `--ignore-user-config` mod plugins, MCP og personlige defaults;
 - `--model` og `model_reasoning_effort` fra `models.json`;
-- `project_doc_max_bytes=0` for at undgå `AGENTS.md`-framing;
+- `project_doc_max_bytes=0` mod `AGENTS.md`-framing;
 - `--sandbox read-only` som tool-level skriveværn;
 - `--cd` til den fælles projektrod;
-- `--output-last-message` til ren markdown.
+- `--output-schema` og `--output-last-message` til rå JSON.
 
-Codex genbruger stadig normal `CODEX_HOME`-auth, selv når user config ignoreres.
-Brug aldrig `--dangerously-bypass-approvals-and-sandbox` til en review-stemme.
+Codex genbruger stadig normal `CODEX_HOME`-auth. Brug aldrig
+`--dangerously-bypass-approvals-and-sandbox` til en review-stemme.
 
-## Outputkontrakt
-
-Alle tre prompts skal kræve:
-
-- konkrete findings med `file:line`;
-- severity, reel risiko og konkret fix;
-- ingen style/naming;
-- en afsluttende `CHECKED:`-attestering;
-- `NO_FINDINGS` når reviewet er rent.
-
-`NO_FINDINGS` uden `CHECKED:` er ikke en gyldig ren stemme.
+**Kendt begrænsning:** trods `--ignore-user-config` og `project_doc_max_bytes=0`
+indlæser Codex stadig `~/.agents/skills` og `~/.codex/AGENTS.md`. Brugerens
+globale opsætning kan derfor forurene prompten (se målingen nedenfor).
+`MISFIRE`-klassifikationen er nettet: en stemme, der spiller orchestrator,
+kasseres og relaunches højst én gang.
 
 ## Verificeret CLI-adfærd 2026-10-24
 
@@ -115,10 +148,10 @@ Rå output ligger i `scripts/fixtures/`.
   global instruks om at gemme en Markdown-rapport. Det skrev den selv i
   `summary` ("could not be saved because the workspace is read-only"). Sandboxen
   stoppede det, men prompt-kontaminering fra brugerens globale opsætning er
-  stadig mulig.
+  stadig mulig. `MISFIRE` er nettet (se Codex-afsnittet ovenfor).
 - Mindste verificerede version-floor for schema-stien: **codex-cli 0.164.0**.
-  `models.json` har `min_cli_version` 0.153.4, som ikke er verificeret med
-  `--output-schema`.
+  `models.json` har `min_cli_version` 0.164.0 (hævet fra 0.153.4, som ikke var
+  verificeret med `--output-schema`).
 - Fixture: `scripts/fixtures/codex-last.json` (1 finding).
 
 ### AGY (Gemini)
@@ -167,6 +200,10 @@ schema).
   `~/.gemini/antigravity-cli/brain/<conversation_id>/create_probe_file.md`, uden
   for `$P` og `$R`. Der var ingen `denied_actions`. Spærringen er altså plan-
   mode-workflowet, ikke en verificeret afvisning i tool-laget.
+  Plan-mode skriver altså sine plan-artefakter til
+  `~/.gemini/antigravity-cli/brain/…`, som ligger uden for indholdsmanifestet.
+  Det er en skrivesti ud af projektet, som manifestet ikke kan se; den kan ikke
+  lukkes herfra, kun noteres.
 - Fixture: `scripts/fixtures/agy-envelope.json` (variant a, 2 findings). Envelopen
   fra d er strukturelt identisk, så der er ingen separat fixture.
 
@@ -188,3 +225,8 @@ fordi plan-mode ellers ikke har nogen effekt. c er fallback.
 
 Plan-mode stopper skrivning i workflowet, men det er ikke en verificeret
 skriveblokering i tool-laget. Indholdsmanifestet er stadig obligatorisk.
+
+**Evidensgrundlag:** beslutningen for variant d hviler på **ét** review og
+**ét** skriveprobe (n=1). Den er ikke gentaget og kan ændre sig mellem
+agy-versioner. Genmål ved en agy-opgradering og forvent aldrig, at plan-mode
+alene beskytter projektet.
