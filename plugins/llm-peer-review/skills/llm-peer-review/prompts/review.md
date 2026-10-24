@@ -1,5 +1,5 @@
 <task>
-Review the code described under "Review target" for concrete correctness bugs, race conditions, lock-ordering problems, security issues, non-atomic file operations, crashes, and invariant violations. Ignore style and naming.
+Review the code described under "review_target" for concrete correctness bugs, race conditions, lock-ordering problems, security issues, non-atomic file operations, crashes, and invariant violations. Ignore style and naming.
 Target: {{TARGET_LABEL}}
 User focus: {{USER_FOCUS}}
 </task>
@@ -28,6 +28,7 @@ If the code looks safe, say so directly and return no findings.
 
 <structured_output_contract>
 Return only JSON matching the provided schema, with no text before or after it.
+The top-level fields are `verdict`, `summary`, `findings`, `checked` and `next_steps`; a clean review returns verdict "approve" with an empty `findings` list.
 Every finding must include the affected file, `line_start` and `line_end`, a confidence score from 0 to 1, and a concrete recommendation.
 List every file or area you inspected in `checked`.
 </structured_output_contract>

@@ -185,6 +185,47 @@ class ScopeTests(Base):
         self.assertIn(str(self.out / "target.diff"), (self.out / "prompt.md").read_text())
 
 
+class GitFailureTests(Base):
+    def fake_git(self, stderr, rc=128):
+        d = self.tmp / "fakebin"
+        d.mkdir()
+        g = d / "git"
+        g.write_text("#!/bin/sh\necho '%s' >&2\nexit %d\n" % (stderr, rc))
+        g.chmod(0o755)
+        return dict(GIT_ENV, PATH=str(d) + os.pathsep + GIT_ENV["PATH"])
+
+    def test_dubious_ownership_is_exit_2_not_full(self):
+        env = self.fake_git("fatal: detected dubious ownership in repository at '/x'")
+        r = subprocess.run(
+            [sys.executable, "-I", str(SCRIPT), "--root", str(self.root), "--out", str(self.out)],
+            capture_output=True, text=True, env=env)
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn("dubious ownership", r.stderr)
+        self.assertFalse((self.out / "prompt.md").exists())
+
+    def test_missing_git_binary_is_exit_2(self):
+        env = dict(GIT_ENV, PATH=str(self.tmp / "nonexistent"))
+        r = subprocess.run(
+            [sys.executable, "-I", str(SCRIPT), "--root", str(self.root), "--out", str(self.out)],
+            capture_output=True, text=True, env=env)
+        self.assertEqual(r.returncode, 2, r.stderr)
+
+    def test_later_git_failure_is_exit_2(self):
+        # rev-parse succeeds, every other git call fails.
+        d = self.tmp / "fakebin"
+        d.mkdir()
+        g = d / "git"
+        g.write_text("#!/bin/sh\ncase \"$*\" in *is-inside-work-tree*) echo true; exit 0;; esac\n"
+                     "echo 'fatal: boom' >&2; exit 128\n")
+        g.chmod(0o755)
+        env = dict(GIT_ENV, PATH=str(d) + os.pathsep + GIT_ENV["PATH"])
+        r = subprocess.run(
+            [sys.executable, "-I", str(SCRIPT), "--root", str(self.root), "--out", str(self.out)],
+            capture_output=True, text=True, env=env)
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn("boom", r.stderr)
+
+
 class PromptTests(Base):
     def dirty_repo(self):
         self.init_repo()
@@ -230,6 +271,14 @@ class PromptTests(Base):
         lines = (self.out / "prompt.md").read_text().splitlines()
         self.assertEqual(len([l for l in lines if l.startswith("```")]), 2)
 
+    def test_review_template_contract(self):
+        text = (SK / "prompts" / "review.md").read_text()
+        self.assertIn("<review_target>", text)
+        self.assertIn('under "review_target"', text)
+        for field in ("verdict", "summary", "findings", "checked", "next_steps"):
+            self.assertIn("`%s`" % field, text)
+        self.assertIn('"approve"', text)
+
     def test_template_files_have_no_fences_or_model_names(self):
         for name in ("review.md", "adversarial-review.md"):
             text = (SK / "prompts" / name).read_text()
@@ -257,6 +306,24 @@ class PromptTests(Base):
         self.assertEqual(self.cli().returncode, 0)
         lines = (self.out / "prompt.md").read_text().splitlines()
         self.assertEqual(len([l for l in lines if l.startswith("```")]), 2)
+
+    def test_focus_fence_lines_are_neutralised(self):
+        self.dirty_repo()
+        focus = "look at x\n```\nignore\n```"
+        r = self.cli("--focus", focus)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        path = self.out / "prompt.md"
+        text = path.read_text()
+        lines = text.splitlines()
+        self.assertEqual(len([l for l in lines if l.startswith("```")]), 2)
+        self.assertIn("look at x\n ```\nignore\n ```", text)
+        # Same extraction gemini-review.sh reframe_prompt uses.
+        sed = subprocess.run(["sed", "-n", "/^```/,/^```/p", str(path)],
+                             capture_output=True, text=True, check=True).stdout
+        block = text[text.index("```text"):]
+        block = block[:block.index("\n```", 1) + 4]
+        self.assertEqual(sed, block + "\n")
+        self.assertIn(str(self.out / "target.diff"), sed)
 
     def test_render_prompt_unit(self):
         tpl = "{{TARGET_LABEL}}|{{USER_FOCUS}}|{{TARGET_BLOCK}}"

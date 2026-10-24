@@ -25,18 +25,25 @@ PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
 
 def _git(root, *args, check=True):
+    # LC_ALL=C keeps git's messages stable ("not a git repository").
     return subprocess.run(
         ["git", "-C", root, *args], capture_output=True, text=True,
-        errors="surrogateescape", check=check,
+        errors="surrogateescape", check=check, env=dict(os.environ, LC_ALL="C"),
     )
 
 
 def _is_git_repo(root):
-    try:
-        r = _git(root, "rev-parse", "--is-inside-work-tree", check=False)
-    except OSError:
+    """True inside a work tree, False only for "not a git repository".
+
+    Any other git failure (dubious ownership, broken repo, ...) raises ValueError
+    so we never silently fall back to a full-tree review.
+    """
+    r = _git(root, "rev-parse", "--is-inside-work-tree", check=False)
+    if r.returncode == 0:
+        return r.stdout.strip() == "true"
+    if "not a git repository" in r.stderr:
         return False
-    return r.returncode == 0 and r.stdout.strip() == "true"
+    raise ValueError("git fejlede: %s" % (r.stderr.strip() or "exit %d" % r.returncode))
 
 
 def _ref_exists(root, ref):
@@ -160,6 +167,9 @@ def _target_block(target, files, diff_path):
 
 def render_prompt(template, target, files, diff_path, focus):
     focus = focus if focus and focus.strip() else PLACEHOLDER_FOCUS
+    # A focus line starting with a fence would be captured by gemini-review.sh's
+    # first-fence extraction instead of the target block; indent such lines.
+    focus = "\n".join(" " + l if l.startswith("```") else l for l in focus.split("\n"))
     block = _target_block(target, files, diff_path)
     # Single pass over distinct placeholders; values are never re-scanned.
     out, i = [], 0
@@ -219,6 +229,12 @@ def main(argv=None):
         return 0
     except ValueError as e:
         print(str(e), file=sys.stderr)
+        return 2
+    except subprocess.CalledProcessError as e:
+        print("git fejlede: %s" % ((e.stderr or "").strip() or "exit %d" % e.returncode), file=sys.stderr)
+        return 2
+    except OSError as e:
+        print("Kunne ikke køre git eller skrive output: %s" % e, file=sys.stderr)
         return 2
 
 
