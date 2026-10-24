@@ -24,10 +24,16 @@ SCOPES = ("auto", "working-tree", "branch", "full")
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
 
+# Repo config must not run code (core.fsmonitor runs on `git status`) and user
+# config must not rewrite target.diff (diff.external, textconv, color.diff=always).
+GIT_SAFE = ("-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null")
+DIFF_SAFE = ("--no-ext-diff", "--no-color", "--no-textconv")
+
+
 def _git(root, *args, check=True):
     # LC_ALL=C keeps git's messages stable ("not a git repository").
     return subprocess.run(
-        ["git", "-C", root, *args], capture_output=True, text=True,
+        ["git", *GIT_SAFE, "-C", root, *args], capture_output=True, text=True,
         errors="surrogateescape", check=check, env=dict(os.environ, LC_ALL="C"),
     )
 
@@ -54,8 +60,13 @@ def _has_head(root):
     return _ref_exists(root, "HEAD")
 
 
+def _diff(root, *args):
+    return _git(root, "diff", *DIFF_SAFE, "--relative", *args).stdout
+
+
 def _is_dirty(root):
-    return bool(_git(root, "status", "--porcelain", "--untracked-files=all").stdout.strip())
+    # Pathspec "." keeps the check to --root, the same subtree the diff covers.
+    return bool(_git(root, "status", "--porcelain", "--untracked-files=all", "--", ".").stdout.strip())
 
 
 def _split_z(text):
@@ -90,6 +101,8 @@ def _usable_ref(root, name):
 def resolve_target(root, scope, base):
     if scope not in SCOPES:
         raise ValueError("Ukendt scope %r; brug auto, working-tree, branch eller full" % scope)
+    if base and scope in ("working-tree", "full"):
+        raise ValueError("--base kan ikke kombineres med --scope %s; brug --scope branch eller auto" % scope)
     if not _is_git_repo(root):
         if scope in ("auto", "full"):
             return {"mode": "full", "label": "full tree (no git repository)", "base_ref": None}
@@ -115,15 +128,13 @@ def write_diff(root, target, path):
     files = []
     if mode == "working-tree":
         if _has_head(root):
-            diff = _git(root, "diff", "--relative", "HEAD").stdout
-            names = _split_z(_git(root, "diff", "--relative", "--name-only", "-z", "HEAD").stdout)
+            diff = _diff(root, "HEAD")
+            names = _split_z(_diff(root, "--name-only", "-z", "HEAD"))
         else:
-            diff = (_git(root, "diff", "--relative", "--cached").stdout
-                    + _git(root, "diff", "--relative").stdout)
-            names = _split_z(
-                _git(root, "diff", "--relative", "--name-only", "-z", "--cached").stdout
-                + "\0" + _git(root, "diff", "--relative", "--name-only", "-z").stdout)
-        untracked = _split_z(_git(root, "ls-files", "-z", "--others", "--exclude-standard").stdout)
+            diff = _diff(root, "--cached") + _diff(root)
+            names = _split_z(_diff(root, "--name-only", "-z", "--cached")
+                             + "\0" + _diff(root, "--name-only", "-z"))
+        untracked = _split_z(_git(root, "ls-files", "-z", "--others", "--exclude-standard", "--", ".").stdout)
         body = diff
         if body and not body.endswith("\n"):
             body += "\n"
@@ -134,8 +145,8 @@ def write_diff(root, target, path):
     elif mode == "branch":
         spec = "%s...HEAD" % target["base_ref"]
         try:
-            body = _git(root, "diff", "--relative", spec).stdout
-            names = _split_z(_git(root, "diff", "--relative", "--name-only", "-z", spec).stdout)
+            body = _diff(root, spec)
+            names = _split_z(_diff(root, "--name-only", "-z", spec))
         except subprocess.CalledProcessError as e:
             raise ValueError("git diff %s fejlede: %s" % (spec, (e.stderr or "").strip()))
         files = list(dict.fromkeys(names))

@@ -185,6 +185,98 @@ class ScopeTests(Base):
         self.assertIn(str(self.out / "target.diff"), (self.out / "prompt.md").read_text())
 
 
+class HardeningTests(Base):
+    def test_user_diff_config_cannot_corrupt_diff(self):
+        self.init_repo()
+        marker = self.tmp / "EXT_DIFF_RAN"
+        ext = self.tmp / "extdiff.sh"
+        ext.write_text("#!/bin/sh\ntouch '%s'\necho GARBAGE\n" % marker)
+        ext.chmod(0o755)
+        cfg = self.tmp / "gitconfig"
+        cfg.write_text("[diff]\n\texternal = %s\n[color]\n\tdiff = always\n\tui = always\n" % ext)
+        write(self.root, ".gitattributes", "*.py diff=fancy\n")
+        git(self.root, "add", ".gitattributes")
+        git(self.root, "commit", "-q", "-m", "attrs")
+        with open(cfg, "a") as fh:
+            fh.write("[diff \"fancy\"]\n\ttextconv = %s\n" % ext)
+        write(self.root, "a.py", "print(2)\n")
+        env = dict(GIT_ENV, GIT_CONFIG_GLOBAL=str(cfg))
+        for scope in ("working-tree",):
+            r = subprocess.run(
+                [sys.executable, "-I", str(SCRIPT), "--root", str(self.root), "--out", str(self.out),
+                 "--scope", scope], capture_output=True, text=True, env=env)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            text = (self.out / "target.diff").read_text()
+            self.assertIn("-print(1)", text)
+            self.assertIn("+print(2)", text)
+            self.assertNotIn("\x1b[", text)
+            self.assertNotIn("GARBAGE", text)
+        git(self.root, "checkout", "-q", "-b", "feat")
+        git(self.root, "commit", "-q", "-am", "feat")
+        r = subprocess.run(
+            [sys.executable, "-I", str(SCRIPT), "--root", str(self.root), "--out", str(self.out),
+             "--scope", "branch", "--base", "main"], capture_output=True, text=True, env=env)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        text = (self.out / "target.diff").read_text()
+        self.assertIn("+print(2)", text)
+        self.assertNotIn("\x1b[", text)
+        self.assertNotIn("GARBAGE", text)
+        self.assertFalse(marker.exists(), "an external diff/textconv driver ran")
+
+    def test_planted_fsmonitor_is_not_executed(self):
+        self.init_repo()
+        marker = self.tmp / "FSMONITOR_RAN"
+        script = self.tmp / "fsmon.sh"
+        script.write_text("#!/bin/sh\ntouch '%s'\n" % marker)
+        script.chmod(0o755)
+        git(self.root, "config", "core.fsmonitor", str(script))
+        write(self.root, "a.py", "print(2)\n")
+        r = self.cli()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertFalse(marker.exists(), "prepare_review.py executed core.fsmonitor")
+
+    def test_subdir_root_ignores_dirt_outside_it(self):
+        self.init_repo()
+        write(self.root, "sub/s.py", "s = 1\n")
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "sub")
+        git(self.root, "checkout", "-q", "-b", "feat")
+        write(self.root, "sub/s.py", "s = 2\n")
+        git(self.root, "commit", "-q", "-am", "feat in sub")
+        write(self.root, "a.py", "print('unrelated dirt')\n")  # dirty, but outside --root
+        write(self.root, "stray.txt", "untracked outside --root\n")
+        sub = self.root / "sub"
+        t = pr.resolve_target(str(sub), "auto", None)
+        self.assertEqual(t["mode"], "branch")
+        r = subprocess.run(
+            [sys.executable, "-I", str(SCRIPT), "--root", str(sub), "--out", str(self.out)],
+            capture_output=True, text=True, env=GIT_ENV)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("+s = 2", (self.out / "target.diff").read_text())
+
+    def test_base_conflicts_with_working_tree_and_full(self):
+        self.init_repo()
+        write(self.root, "a.py", "print(2)\n")
+        for scope in ("working-tree", "full"):
+            r = self.cli("--scope", scope, "--base", "main")
+            self.assertEqual(r.returncode, 2, (scope, r.stderr))
+            self.assertIn("--base", r.stderr)
+            self.assertFalse((self.out / "prompt.md").exists())
+        r = self.cli("--scope", "full", "--base", "nosuchref")
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn("--base", r.stderr)
+
+    def test_base_with_auto_and_branch_still_works(self):
+        self.init_repo()
+        write(self.root, "b.py", "y = 2\n")
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-q", "-m", "second")
+        for scope in ("auto", "branch"):
+            r = self.cli("--scope", scope, "--base", "HEAD~1")
+            self.assertEqual(r.returncode, 0, (scope, r.stderr))
+            self.assertEqual(json.loads((self.out / "target.json").read_text())["base_ref"], "HEAD~1")
+
+
 class GitFailureTests(Base):
     def fake_git(self, stderr, rc=128):
         d = self.tmp / "fakebin"
