@@ -6,15 +6,23 @@ CLI:
                                  exit 0 (VALID/CLEAN), 5 WEAK, 6 ERROR, 8 NOTJSON
   review_json.py extract FILE    print the normalised review JSON (exit 0),
                                  else a message on stderr and exit 65
+  review_json.py aggregate --root ROOT VOICE=FILE [VOICE=FILE...]
+                                 print Markdown: one status line per voice, then a table
+                                 of deterministic finding clusters (exit 0; exit 64 on usage)
 """
 import json
+import math
+import os
+import posixpath
 import re
 import sys
 from pathlib import Path
 
 SCHEMA_PATH = Path(__file__).resolve().parent.parent / "schemas" / "review-output.schema.json"
 EXIT_CODES = {"VALID": 0, "CLEAN": 0, "WEAK": 5, "ERROR": 6, "NOTJSON": 8}
-FENCE = re.compile(r"\A```(?:json)?[ \t]*\r?\n(.*?)\r?\n?```\Z", re.DOTALL)
+FENCE = re.compile(r"\A```(?:json)?[ \t]*\r?\n(.*?)\r?\n?```\Z", re.DOTALL | re.IGNORECASE)
+SEVERITY_RANK = {"critical": 3, "high": 2, "medium": 1, "low": 0}
+LINE_MARGIN = 3
 
 
 class ReviewError(Exception):
@@ -107,6 +115,9 @@ def _check(value, schema, where, errors):
     if t == "string" and len(value) < schema.get("minLength", 0):
         errors.append(f"{where}: string shorter than {schema['minLength']}")
     if t in ("integer", "number"):
+        if not math.isfinite(value):  # json.loads accepts NaN/Infinity
+            errors.append(f"{where}: {value} is not a finite number")
+            return
         if "minimum" in schema and value < schema["minimum"]:
             errors.append(f"{where}: {value} < minimum {schema['minimum']}")
         if "maximum" in schema and value > schema["maximum"]:
@@ -143,9 +154,97 @@ def classify(review):
     return "CLEAN" if review["verdict"] == "approve" else "WEAK"
 
 
+def normalize_path(path, root):
+    """Repo-relative POSIX path: strips the root prefix and any leading ./"""
+    p = path.replace("\\", "/")
+    r = root.replace("\\", "/").rstrip("/")
+    if r and p.startswith(r + "/"):
+        p = p[len(r) + 1:]
+    p = posixpath.normpath(p)
+    return p[2:] if p.startswith("./") else p
+
+
+def cluster(reviews, root):
+    """Merge findings of all voices on the same file whose line ranges (padded by
+    LINE_MARGIN each side) overlap. Sorted by severity, voice count, file, line."""
+    items = []
+    for voice, review in reviews.items():
+        for fd in review["findings"]:
+            lo, hi = sorted((fd["line_start"], fd["line_end"]))
+            items.append((normalize_path(fd["file"], root), lo, hi, voice, fd))
+    items.sort(key=lambda it: (it[0], it[1], it[2], it[3], it[4]["title"]))
+    clusters = []
+    for file, lo, hi, voice, fd in items:
+        cur = clusters[-1] if clusters else None
+        if cur and cur["file"] == file and lo - LINE_MARGIN <= cur["line_end"] + LINE_MARGIN:
+            cur["line_end"] = max(cur["line_end"], hi)
+            if SEVERITY_RANK[fd["severity"]] > SEVERITY_RANK[cur["severity"]]:
+                cur["severity"] = fd["severity"]
+            cur["confidence"] = max(cur["confidence"], fd["confidence"])
+            cur["voices"].add(voice)
+            if fd["title"] not in cur["titles"]:
+                cur["titles"].append(fd["title"])
+        else:
+            clusters.append({"file": file, "line_start": lo, "line_end": hi,
+                             "severity": fd["severity"], "voices": {voice},
+                             "confidence": fd["confidence"], "titles": [fd["title"]]})
+    for c in clusters:
+        c["voices"] = sorted(c["voices"])
+    clusters.sort(key=lambda c: (-SEVERITY_RANK[c["severity"]], -len(c["voices"]), c["file"], c["line_start"]))
+    return clusters
+
+
+def _cell(text):
+    return " ".join(str(text).split()).replace("|", "\\|")
+
+
+def _aggregate(root, specs):
+    """Markdown report for (voice, file) pairs; a voice that is not VALID/CLEAN is MANGLER."""
+    lines, usable = [], {}
+    for voice, path in specs:
+        if not os.path.exists(path):
+            status = "MANGLER (MISSING)"
+        else:
+            try:
+                review = load_review(path)
+            except ReviewError as exc:
+                status = "MANGLER (%s)" % ("ERROR" if exc.kind == "error" else "NOTJSON")
+            else:
+                word = classify(review)
+                if word in ("VALID", "CLEAN"):
+                    status, usable[voice] = word, review
+                else:
+                    status = f"MANGLER ({word})"
+        lines.append(f"- {voice}: {status}")
+    lines += ["", "| # | Severity | Location | Voices | Conf | Titles |", "|---|---|---|---|---|---|"]
+    for n, c in enumerate(cluster(usable, root), 1):
+        loc = f"{c['file']}:{c['line_start']}-{c['line_end']}"
+        lines.append(f"| {n} | {c['severity']} | {_cell(loc)} | {', '.join(c['voices'])} "
+                     f"| {c['confidence']:.2f} | {_cell('; '.join(c['titles']))} |")
+    return "\n".join(lines) + "\n"
+
+
+def _aggregate_cli(args):
+    usage = "usage: review_json.py aggregate --root ROOT VOICE=FILE [VOICE=FILE...]"
+    if len(args) < 3 or args[0] != "--root":
+        print(usage, file=sys.stderr)
+        return 64
+    specs = []
+    for arg in args[2:]:
+        voice, sep, path = arg.partition("=")
+        if not sep or not voice or not path:
+            print(usage, file=sys.stderr)
+            return 64
+        specs.append((voice, path))
+    sys.stdout.write(_aggregate(args[1], specs))
+    return 0
+
+
 def _cli(argv):
+    if len(argv) > 1 and argv[1] == "aggregate":
+        return _aggregate_cli(argv[2:])
     if len(argv) != 3 or argv[1] not in ("classify", "extract"):
-        print("usage: review_json.py classify|extract FILE", file=sys.stderr)
+        print("usage: review_json.py classify|extract FILE | aggregate --root ROOT VOICE=FILE...", file=sys.stderr)
         return 64
     cmd, path = argv[1], argv[2]
     try:
