@@ -207,16 +207,56 @@ class ReviewJsonTests(unittest.TestCase):
         self.assertEqual(len(rj.cluster(r, "/R")), 2)
 
     def test_cluster_takes_max_severity_confidence_and_unique_titles(self):
-        r = {"claude": rev(f("a.py", 10, "low", "T1", 0.4), f("a.py", 11, "critical", "T2", 0.7)),
-             "codex": rev(f("a.py", 12, "medium", "T1", 0.95))}
+        r = {"claude": rev(f("a.py", 10, "low", "T1", 0.4)),
+             "codex": rev(f("a.py", 11, "critical", "T2", 0.7)),
+             "gemini": rev(f("a.py", 12, "medium", "T1", 0.95))}
         [c] = rj.cluster(r, "/R")
-        self.assertEqual((c["severity"], c["confidence"], c["voices"]), ("critical", 0.95, ["claude", "codex"]))
+        self.assertEqual((c["severity"], c["confidence"], c["voices"]),
+                         ("critical", 0.95, ["claude", "codex", "gemini"]))
         self.assertEqual(sorted(c["titles"]), ["T1", "T2"])
 
-    def test_chain_extends_cluster(self):
+    def test_same_voice_findings_never_merge(self):
+        # Formerly test_chain_extends_cluster: a same-voice chain grew one cluster 10-22.
         r = {"claude": rev(f("a.py", 10), f("a.py", 16), f("a.py", 22))}
-        [c] = rj.cluster(r, "/R")
-        self.assertEqual((c["line_start"], c["line_end"]), (10, 22))
+        got = [(c["line_start"], c["line_end"], c["voices"]) for c in rj.cluster(r, "/R")]
+        self.assertEqual(sorted(got), [(10, 10, ["claude"]), (16, 16, ["claude"]), (22, 22, ["claude"])])
+
+    def test_merge_is_anchored_not_transitive(self):
+        # 10 -> 15 -> 20 would chain under a growing interval; 20 is outside anchor 10 +-3.
+        r = {"claude": rev(f("a.py", 10)), "codex": rev(f("a.py", 15)), "gemini": rev(f("a.py", 20))}
+        clusters = rj.cluster(r, "/R")
+        self.assertEqual(len(clusters), 2)
+        self.assertIn((10, 15, ["claude", "codex"]),
+                      [(c["line_start"], c["line_end"], c["voices"]) for c in clusters])
+
+    def test_probe_whole_file_low_does_not_absorb_unrelated_criticals(self):
+        r = {"claude": rev(f("a.py", 1, "low", "Whole-file nit", line_end=300)),
+             "codex": rev(f("a.py", 50, "critical", "SQL injection")),
+             "gemini": rev(f("a.py", 200, "critical", "Race in cache"))}
+        clusters = rj.cluster(r, "/R")
+        self.assertEqual(len(clusters), 3)
+        self.assertTrue(all(len(c["voices"]) == 1 for c in clusters))
+
+    def test_wide_finding_is_never_merged(self):
+        r = {"claude": rev(f("a.py", 10, line_end=60)), "codex": rev(f("a.py", 10, line_end=12))}
+        self.assertTrue(all(len(c["voices"]) == 1 for c in rj.cluster(r, "/R")))
+
+    def test_probe_same_voice_chain_does_not_fake_consensus(self):
+        r = {"claude": rev(f("a.py", 10, title="A"), f("a.py", 16, title="B"), f("a.py", 22, title="C")),
+             "codex": rev(f("a.py", 25, title="D"))}
+        clusters = rj.cluster(r, "/R")
+        multi = [c for c in clusters if len(c["voices"]) > 1]
+        self.assertEqual([(c["line_start"], c["line_end"], c["titles"]) for c in multi], [(22, 25, ["C", "D"])])
+        for c in clusters:
+            if c["line_start"] in (10, 16):
+                self.assertEqual(c["voices"], ["claude"])
+
+    def test_other_voice_joins_at_most_one_cluster(self):
+        r = {"claude": rev(f("a.py", 10, title="A"), f("a.py", 12, title="B")),
+             "codex": rev(f("a.py", 11, title="C"))}
+        clusters = rj.cluster(r, "/R")
+        self.assertEqual(len(clusters), 2)
+        self.assertEqual(sum(len(c["voices"]) for c in clusters), 3)  # no finding counted twice
 
     def test_sort_severity_then_votes(self):
         r = {"claude": rev(f("a.py", 1, "high"), f("b.py", 1, "medium"), f("c.py", 1, "high"), f("d.py", 1, "low")),

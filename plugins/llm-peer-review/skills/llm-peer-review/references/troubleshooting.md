@@ -53,7 +53,10 @@ tavshed må aldrig bruges som enighed. Relaunch-opskriften står i SKILL.md §4.
   ekstra felter, forkert enum, `line_*` under 1 eller `confidence` uden for 0-1
   giver `WEAK`.
 - **Samme fund står som flere klynger:** `aggregate.md` slår kun sammen på
-  normaliseret sti og nærliggende linjer; flet semantisk ens klynger manuelt (§5).
+  normaliseret sti og linjer inden for ±3 af klyngens første finding (aldrig samme
+  stemme, aldrig findings over 40 linjer); flet semantisk ens klynger manuelt (§5).
+- **Én klynge rummer flere problemer:** split den (SKILL.md §5); stemmer tæller kun,
+  når de beskriver samme defekt.
 - **Intern AGY-dialog giver falsk `VALID`:** kontrollér `attemptN.raw.json`, men
   klassificér kun `attemptN.final.md`, der er udtrukket fra envelopen.
 - **Et retry overskriver evidens:** hvert forsøg beholder `attemptN.raw.json`,

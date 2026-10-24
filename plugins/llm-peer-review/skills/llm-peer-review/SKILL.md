@@ -129,8 +129,18 @@ anden model.
 ## 5. Verificér
 
 Læs hver klynge i `aggregate.md` mod kildekoden, ikke kun beskrivelsen.
+`aggregate.md` har kun titler. Body, recommendation og reviewernes markeringer af
+inferens og usikkerhed står i `review_<voice>_<RID>.extracted.json` i run-mappen
+(det normaliserede JSON-svar pr. stemme); læs dem dér.
 
-- Klynger med flere stemmer: konsensus, men bekræft stadig stedet.
+Scriptet grupperer kun efter sti og nærhed: en finding kommer i en klynge, når
+dens linjer ligger inden for ±3 linjer af klyngens første finding, aldrig to
+findings fra samme stemme, og en finding over 40 linjer slås aldrig sammen.
+Nærhed er ikke det samme som enighed.
+
+- En klynge med mere end ét særskilt problem skal splittes; stemmer tæller kun,
+  når de beskriver samme defekt.
+- Klynger med flere stemmer om samme defekt: konsensus, men bekræft stadig stedet.
 - Klynger med én stemme: bekræft eller afvis med konkret evidens (kode, kald, test).
 - Semantisk ens klynger, som scriptet ikke slog sammen (andre linjer/ordlyd), flettes.
 - `CLEAN` er en gyldig nul-finding-stemme, ikke en finding.
@@ -145,7 +155,8 @@ versionspunktummer bevaret (fx `CODE_REVIEW_2026-10-24_claude_opus_5.5.md`).
 - Findings først, sorteret efter severity (critical, high, medium, low), med
   disposition (accepteret/afvist) og evidens.
 - `file:line` ordret som reviewerne rapporterede, og bevar markeringer af
-  inferens, usikkerhed og åbne spørgsmål. Ingen nye findings uden kilde.
+  inferens, usikkerhed og åbne spørgsmål (fra `review_<voice>_<RID>.extracted.json`).
+  Ingen nye findings uden kilde.
 - Ingen findings: sig det eksplicit og hold restrisiko kort.
 
 Gentag indholdet i svaret og STOP derefter. Spørg, hvilke findings der skal

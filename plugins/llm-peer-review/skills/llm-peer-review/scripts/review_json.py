@@ -23,6 +23,7 @@ EXIT_CODES = {"VALID": 0, "CLEAN": 0, "WEAK": 5, "ERROR": 6, "NOTJSON": 8}
 FENCE = re.compile(r"\A```(?:json)?[ \t]*\r?\n(.*?)\r?\n?```\Z", re.DOTALL | re.IGNORECASE)
 SEVERITY_RANK = {"critical": 3, "high": 2, "medium": 1, "low": 0}
 LINE_MARGIN = 3
+WIDE_SPAN = 40  # a finding wider than this many lines is never merged
 
 
 class ReviewError(Exception):
@@ -165,8 +166,16 @@ def normalize_path(path, root):
 
 
 def cluster(reviews, root):
-    """Merge findings of all voices on the same file whose line ranges (padded by
-    LINE_MARGIN each side) overlap. Sorted by severity, voice count, file, line."""
+    """Group findings of DIFFERENT voices that point at the same spot.
+
+    Anchor-based, never transitive: a finding joins a cluster only if its line
+    range overlaps the cluster's anchor (its first finding's range) with
+    LINE_MARGIN lines of slack on each side, and only if that voice is not in the
+    cluster yet (same-voice findings never merge). A finding spanning more than
+    WIDE_SPAN lines is never merged. Of several candidates the nearest anchor wins.
+    Sorted by severity, voice count, file, line. Proximity is not identity: the
+    orchestrator still splits clusters that hold more than one defect (SKILL.md §5).
+    """
     items = []
     for voice, review in reviews.items():
         for fd in review["findings"]:
@@ -175,21 +184,32 @@ def cluster(reviews, root):
     items.sort(key=lambda it: (it[0], it[1], it[2], it[3], it[4]["title"]))
     clusters = []
     for file, lo, hi, voice, fd in items:
-        cur = clusters[-1] if clusters else None
-        if cur and cur["file"] == file and lo - LINE_MARGIN <= cur["line_end"] + LINE_MARGIN:
-            cur["line_end"] = max(cur["line_end"], hi)
-            if SEVERITY_RANK[fd["severity"]] > SEVERITY_RANK[cur["severity"]]:
-                cur["severity"] = fd["severity"]
-            cur["confidence"] = max(cur["confidence"], fd["confidence"])
-            cur["voices"].add(voice)
-            if fd["title"] not in cur["titles"]:
-                cur["titles"].append(fd["title"])
-        else:
-            clusters.append({"file": file, "line_start": lo, "line_end": hi,
-                             "severity": fd["severity"], "voices": {voice},
+        wide = hi - lo + 1 > WIDE_SPAN
+        best, best_gap = None, None
+        if not wide:
+            for c in clusters:
+                if c["file"] != file or c["wide"] or voice in c["voices"]:
+                    continue
+                a_lo, a_hi = c["anchor"]
+                gap = max(0, lo - a_hi, a_lo - hi)
+                if gap <= 2 * LINE_MARGIN and (best_gap is None or gap < best_gap):
+                    best, best_gap = c, gap
+        if best is None:
+            clusters.append({"file": file, "line_start": lo, "line_end": hi, "anchor": (lo, hi),
+                             "wide": wide, "severity": fd["severity"], "voices": {voice},
                              "confidence": fd["confidence"], "titles": [fd["title"]]})
+            continue
+        best["line_start"] = min(best["line_start"], lo)
+        best["line_end"] = max(best["line_end"], hi)
+        if SEVERITY_RANK[fd["severity"]] > SEVERITY_RANK[best["severity"]]:
+            best["severity"] = fd["severity"]
+        best["confidence"] = max(best["confidence"], fd["confidence"])
+        best["voices"].add(voice)
+        if fd["title"] not in best["titles"]:
+            best["titles"].append(fd["title"])
     for c in clusters:
         c["voices"] = sorted(c["voices"])
+        del c["anchor"], c["wide"]
     clusters.sort(key=lambda c: (-SEVERITY_RANK[c["severity"]], -len(c["voices"]), c["file"], c["line_start"]))
     return clusters
 
