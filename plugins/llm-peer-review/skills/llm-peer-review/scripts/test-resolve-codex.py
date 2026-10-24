@@ -19,9 +19,9 @@ class ResolverTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(prefix="codex-resolver-test-")
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
-        self.floor = (0, 153, 4)
+        self.floor = (0, 164, 0)
 
-    def cli(self, name, output="codex-cli 0.153.4", rc=0):
+    def cli(self, name, output="codex-cli 0.164.0", rc=0):
         path = self.root / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text('#!/bin/sh\n[ "$#" -eq 1 ] && [ "$1" = "--version" ] || exit 97\n'
@@ -33,12 +33,12 @@ class ResolverTests(unittest.TestCase):
         old = self.cli("bin/codex", "codex-cli 0.146.0")
         app = self.cli("Applications/ChatGPT.app/Contents/Resources/codex")
         paths = resolver.candidates(str(old.parent), [self.root / "Applications"], [])
-        self.assertEqual(resolver.select(paths, self.floor), (app, "0.153.4"))
+        self.assertEqual(resolver.select(paths, self.floor), (app, "0.164.0"))
 
     def test_newest_numeric_version_wins(self):
         old = self.cli("one/codex", "codex-cli 0.99.0")
         good = self.cli("two/codex")
-        new = self.cli("three/codex", "codex-cli 0.154.1")
+        new = self.cli("three/codex", "codex-cli 0.165.1")
         self.assertEqual(resolver.select([old, good, new], self.floor)[0], new)
 
     def test_path_scan_finds_later_install(self):
@@ -86,20 +86,20 @@ class ResolverTests(unittest.TestCase):
 
     def test_standard_install_found_outside_path(self):
         old = self.cli("old/bin/codex", "codex-cli 0.146.0")
-        new = self.cli("standard/bin/codex", "codex-cli 0.154.0")
+        new = self.cli("standard/bin/codex", "codex-cli 0.165.0")
         paths = resolver.candidates(str(old.parent), [], [new.parent])
-        self.assertEqual(resolver.select(paths, self.floor), (new, "0.154.0"))
+        self.assertEqual(resolver.select(paths, self.floor), (new, "0.165.0"))
 
     def test_npm_native_fallback_without_node_on_path(self):
         package = "prefix/lib/node_modules/@openai/codex/"
         wrapper = self.cli(package + "bin/codex.js", "", 127)
         native = self.cli(package + "node_modules/@openai/codex-darwin-arm64/"
-                          "vendor/aarch64-apple-darwin/bin/codex", "codex-cli 0.154.0")
+                          "vendor/aarch64-apple-darwin/bin/codex", "codex-cli 0.165.0")
         launcher = self.root / "prefix/bin/codex"
         launcher.parent.mkdir(parents=True)
         launcher.symlink_to(wrapper)
         paths = resolver.candidates("/usr/bin:/bin", [], [launcher.parent])
-        self.assertEqual(resolver.select(paths, self.floor), (native.resolve(), "0.154.0"))
+        self.assertEqual(resolver.select(paths, self.floor), (native.resolve(), "0.165.0"))
 
     def test_old_native_fallback_still_rejected(self):
         package = "prefix/lib/node_modules/@openai/codex/"

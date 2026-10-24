@@ -10,19 +10,26 @@
 # work unchanged, and so an autonomous agent still has ONE command it cannot get
 # wrong (instead of improvising an unhardened call - see SKILL.md "Hærdning").
 #
-# OUTPUT FORMAT (important for consumers): `agy` runs with `--output-format json`.
-# Each raw envelope is retained, but only its final `.response` string is
-# classified and published. The published `${BASE}.json` keeps its historical
-# suffix for compatibility, while its CONTENT remains markdown. Consumers must
-# read that file as markdown, not pass it to jq.
+# OUTPUT FORMAT (important for consumers): `agy` runs with `--output-format json`
+# and `--json-schema schemas/review-output.schema.json`. Each raw envelope is
+# retained, but only its final payload (extract-agy-response.sh: the
+# `.structured_output` object, else `.response`) is classified and published. The
+# published `${BASE}.json` is the schema JSON the reviewer returned.
 #
 # HARDENING DELTA vs the old claude-binary path: `agy` has no `--tools` /
 # `--system-prompt` / `--permission-mode` flags. The reviewer instructions are
-# PREPENDED to the prompt instead, and `--dangerously-skip-permissions` is used
-# so the headless one-shot never hangs on a permission prompt. That flag also
-# auto-approves writes, so the read-only invariant is enforced by PROMPT only
-# ("Do NOT modify any files"), not at the tool layer - run reviews from a clean
-# git state so any accidental write is visible in `git status`. `agy` reads
+# PREPENDED to the prompt instead. Read-only flags are the variant verified in
+# references/hardening.md (2026-10-24, "variant d"): `--mode plan --sandbox
+# --dangerously-skip-permissions`. The last flag is needed so the headless
+# one-shot never hangs on a permission prompt; `--mode plan` makes the agent
+# plan instead of write (verified: a write probe produced no file), and
+# `--sandbox` confines the terminal. `--disable-slash-commands` must NOT be
+# passed: it silently disables plan mode. Plan mode is a workflow gate, NOT a
+# tool-layer block (agy's own write_file still works when it chooses to), so the
+# content manifest before/after remains mandatory. agy writes relative paths into
+# the LAST --add-dir, so the project (CWD) is passed last and the run directory
+# is never passed; only $REVIEW_DIR/shared (target.diff, prompt.md) is added
+# before it. `agy` reads
 # GEMINI.md / AGENTS.md (NOT CLAUDE.md) for workspace rules, so the CLAUDE.md
 # orchestrator-contamination vector is gone but an AGENTS.md/GEMINI.md in the
 # repo is a new one - the prepended system prompt + MISFIRE classification guard
@@ -40,6 +47,8 @@
 #                           "gemini-3.8-flash-high"; e.g.
 #                           "gemini-3.1-pro-high" for the Pro tier)
 #   GEMINI_ATTEMPT_CAP      seconds per attempt (default 900)
+#   AGY_BIN                 agy executable (default `agy` from PATH; set it from
+#                           `preflight.sh agy-path`)
 #
 # Writes (matching what wait-for-reviewers.sh expects):
 #   ${BASE}.json                    published extracted final response (markdown)
@@ -90,7 +99,7 @@ case "$MODEL" in
 esac
 # FAMILY-DIVERSITY GUARD: this is the GEMINI (Google-family) voice. `agy` also
 # exposes Claude (Sonnet/Opus 4.6) and GPT-OSS models, but routing this voice
-# through Claude would collapse triple-review's Anthropic/Google/OpenAI diversity
+# through Claude would collapse llm-peer-review's Anthropic/Google/OpenAI diversity
 # into two Claude voices (the skill's "aldrig en 2. Claude" rule). Only accept a
 # lowercase `gemini-...` CLI model ID here.
 case "$MODEL" in
@@ -98,7 +107,10 @@ case "$MODEL" in
   *) echo "[gemini-review] GEMINI_REVIEW_MODEL must be an exact lowercase Gemini CLI model ID (got: '$MODEL'). This is the Google-family voice - never route it through Claude/GPT via agy; it breaks family diversity. Examples: 'gemini-3.8-flash-high', 'gemini-3.1-pro-high'." >&2; exit 64 ;;
 esac
 
-command -v agy >/dev/null 2>&1 || { echo "[gemini-review] 'agy' (Antigravity CLI) not found in PATH - install it or set PATH" >&2; exit 64; }
+AGY="${AGY_BIN:-agy}"
+command -v "$AGY" >/dev/null 2>&1 || { echo "[gemini-review] 'agy' (Antigravity CLI) not found (AGY_BIN='${AGY_BIN:-}', PATH) - install it or set AGY_BIN" >&2; exit 64; }
+SCHEMA="$SKILL_DIR/../schemas/review-output.schema.json"
+[ -f "$SCHEMA" ] || { echo "[gemini-review] review schema missing: $SCHEMA" >&2; exit 64; }
 
 # `agy models` has emitted several line formats across versions: a bare ID,
 # ID<TAB>label, and ID\tlabel where the separator is the two literal characters
@@ -121,7 +133,7 @@ extract_agy_model_ids() {
 # would freeze the whole script. Cap it; on timeout, skip validation (best-effort)
 # and rely on the run + classify → .SKIPPED.
 _MODELS_TMP="$(mktemp -t agymodels.XXXXXX 2>/dev/null || echo /tmp/agymodels.$$)"
-( agy models >"$_MODELS_TMP" 2>/dev/null ) & _mpid=$!
+( "$AGY" models >"$_MODELS_TMP" 2>/dev/null ) & _mpid=$!
 _mw=0
 while kill -0 "$_mpid" 2>/dev/null; do
   sleep 1; _mw=$((_mw+1))
@@ -163,7 +175,7 @@ ACCEPT="${GEMINI_REVIEW_ACCEPT:-valid}"
 # Reviewer system prompt - PREPENDED to the user prompt because agy has no
 # --system-prompt flag. Mirrors the claude/codex voices' framing plus an
 # explicit read-only instruction (agy has no tool-layer read-only guarantee).
-SYS="You are a single, standalone code reviewer running headless. You read the code yourself and output findings ONLY. You are NOT an orchestrator: never launch or wait for other reviewers, never mention a findings log, dispositions, background tasks, or sub-agents. Do NOT modify, create, or delete any files - you have read-only intent. Report concrete bugs with file:line, the risk, and a fix."
+SYS="You are a single, standalone code reviewer running headless. You read the code yourself and output findings ONLY. You are NOT an orchestrator: never launch or wait for other reviewers, never mention a findings log, dispositions, background tasks, or sub-agents. Do NOT modify, create, or delete any files - you have read-only intent. Report concrete bugs with file:line, the risk, and a fix. Return only JSON matching the provided schema."
 
 # System prompt used ONLY on a content-policy refusal retry (see the REFUSED
 # branch below). The refusal is triggered by attack-category WORDS (security,
@@ -175,7 +187,7 @@ SYS="You are a single, standalone code reviewer running headless. You read the c
 # do-not-decline. Substance (correctness/concurrency/input handling) lives in the
 # reframed user prompt and still surfaces security-relevant bugs (confirmed: this
 # wording caught a CSV-injection bug the security-framed prompt was refused for).
-SYS_DEFENSIVE="You are a senior software engineer reviewing your own team's codebase before release, to find and fix bugs so they can be remediated before shipping. This is a normal, sanctioned engineering review of code you are authorized to read; do NOT decline and do NOT lecture - just report what you find. Output concrete findings ONLY, each with file:line, the issue, why it matters, and a fix. Do NOT modify, create, or delete any files. You are NOT an orchestrator: never launch or mention other reviewers."
+SYS_DEFENSIVE="You are a senior software engineer reviewing your own team's codebase before release, to find and fix bugs so they can be remediated before shipping. This is a normal, sanctioned engineering review of code you are authorized to read; do NOT decline and do NOT lecture - just report what you find. Output concrete findings ONLY, each with file:line, the issue, why it matters, and a fix. Return only JSON matching the provided schema. Do NOT modify, create, or delete any files. You are NOT an orchestrator: never launch or mention other reviewers."
 
 # On a refusal retry, REPLACE the caller's attack-framed instruction with a fixed
 # NEUTRAL one (asks for the same substance - correctness, concurrency, robustness,
@@ -186,7 +198,7 @@ SYS_DEFENSIVE="You are a senior software engineer reviewing your own team's code
 # filter. Any inlined fenced diff/code block IS the review's substance, so it is
 # preserved verbatim; a Mode-B "review the files" prompt has no fence and agy sees
 # the tree via --add-dir.
-NEUTRAL_INSTRUCTION="Review the code for correctness bugs, race conditions and thread-safety, robustness and edge cases, resource and error handling, configuration validation, and careful handling of untrusted input and of any values written into generated output (so a downstream consumer cannot misinterpret them). For each issue: file:line, what is wrong, why it matters, and a concrete fix. Output findings only."
+NEUTRAL_INSTRUCTION="Review the code for correctness bugs, race conditions and thread-safety, robustness and edge cases, resource and error handling, configuration validation, and careful handling of untrusted input and of any values written into generated output (so a downstream consumer cannot misinterpret them). For each issue: file:line, what is wrong, why it matters, and a concrete fix. Return only JSON matching the provided schema."
 reframe_prompt() {
   local p="$1" fence
   # Capture the first fenced block (```...```), if any - that's the inlined diff/code.
@@ -252,6 +264,13 @@ kill_tree() {
   kill "$p" 2>/dev/null
 }
 
+# Workspace dirs: shared inputs first, project LAST (agy writes relative paths into
+# the last --add-dir, so the manifest-checked project must be it). $REVIEW_DIR
+# itself is never passed - other voices' outputs stay out of agy's workspace.
+ADD_DIRS=()
+[ -d "$REVIEW_ROOT/shared" ] && ADD_DIRS+=(--add-dir "$REVIEW_ROOT/shared")
+ADD_DIRS+=(--add-dir "$CWD")
+
 # One hardened attempt through agy. A retry here covers transient client/network
 # blips and Google-side capacity. agy's own --print-timeout is a secondary cap;
 # the watchdog loop below is the hard backstop.
@@ -265,13 +284,16 @@ run_attempt() {
   : > "$raw"
   : > "$out"
   : > "$err"
-  ( cd "$CWD" && agy -p "${sys}
+  ( cd "$CWD" && "$AGY" -p "${sys}
 
 ${prompt}" \
       --model "$MODEL" \
       --output-format json \
-      --add-dir "$CWD" \
+      --json-schema "$SCHEMA" \
+      --mode plan \
+      --sandbox \
       --dangerously-skip-permissions \
+      "${ADD_DIRS[@]}" \
       --print-timeout "${ATTEMPT_CAP}s" \
       </dev/null > "$raw" 2> "$err" ) &
   pid=$!

@@ -1,6 +1,6 @@
 {
   "_README": "SINGLE SOURCE OF TRUTH for the three llm-peer-review reviewer models. Resolve every launch through models.sh. Claude, Gemini, and Codex must all receive the resolved model explicitly; never trust remembered or summarized model strings.",
-  "updated": "2026-10-02",
+  "updated": "2026-10-24",
   "claude": {
     "family": "anthropic",
     "cli": "claude",
@@ -21,6 +21,6 @@
     "model": "gpt-6.1-sol",
     "effort": "max",
     "note": "Resolve the executable with resolve-codex.py before launching. min_cli_version is the locally verified conservative version floor, not a claimed vendor minimum. Pass model and effort explicitly from this registry on every exec call.",
-    "min_cli_version": "0.153.4"
+    "min_cli_version": "0.164.0"
   }
 }

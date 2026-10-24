@@ -29,6 +29,13 @@ printf '%s\n' \
   '  exit 0' \
   'fi' \
   'printf "%s\n" "$*" | grep -Fq -- "--output-format json"' \
+  'printf "%s\n" "$*" | grep -Fq -- "--json-schema ${AGY_EXPECTED_SCHEMA}"' \
+  'printf "%s\n" "$*" | grep -Fq -- "--mode plan"' \
+  'printf "%s\n" "$*" | grep -Fq -- "--sandbox"' \
+  'printf "%s\n" "$*" | grep -Fq -- "--dangerously-skip-permissions"' \
+  'if printf "%s\n" "$*" | grep -Fq -- "--disable-slash-commands"; then exit 3; fi' \
+  'printf "%s\n" "$*" | grep -Fq -- "--add-dir ${AGY_EXPECTED_SHARED} --add-dir ${AGY_EXPECTED_CWD} --"' \
+  'if printf "%s\n" "$*" | grep -Fq -- "--add-dir ${AGY_EXPECTED_REVIEW} "; then exit 4; fi' \
   'printf "%s\n" "$*" | grep -Fq -- "--print-timeout ${AGY_EXPECTED_CAP}s"' \
   'COUNT=0' \
   '[ -f "$AGY_FAKE_COUNTER" ] && COUNT="$(sed -n "1p" "$AGY_FAKE_COUNTER")"' \
@@ -43,8 +50,13 @@ chmod +x "$FAKE_AGY"
 
 export AGY_FAKE_COUNTER="$COUNTER"
 export AGY_EXPECTED_CAP=900
+export AGY_EXPECTED_SCHEMA="$SCRIPT_DIR/../schemas/review-output.schema.json"
+export AGY_EXPECTED_SHARED="$REVIEW_ROOT/shared"
+export AGY_EXPECTED_CWD="$PROJECT_ROOT"
+export AGY_EXPECTED_REVIEW="$REVIEW_ROOT"
+mkdir -p "$REVIEW_ROOT/shared"
 unset GEMINI_ATTEMPT_CAP
-PATH="$FAKE_BIN:$PATH" \
+AGY_BIN="$FAKE_AGY" \
 REVIEW_DIR="$REVIEW_ROOT" \
   "$WRAPPER" fixture 'Review the supplied project and return the required contract.' "$PROJECT_ROOT"
 
@@ -70,14 +82,14 @@ grep -Fxq '[attempt2 classification]' "$BASE.err"
 grep -Fxq '[attempt1 artifacts]' "$BASE.err"
 grep -Fxq '[attempt2 artifacts]' "$BASE.err"
 
-PATH="$FAKE_BIN:$PATH" \
+AGY_BIN="$FAKE_AGY" \
 REVIEW_DIR="$REVIEW_ROOT" \
 GEMINI_ATTEMPT_CAP=30 AGY_EXPECTED_CAP=30 \
   "$WRAPPER" override 'Review with an explicit attempt limit.' "$PROJECT_ROOT"
 [ -f "$REVIEW_ROOT/review_gemini_override.VOICE" ]
 
 set +e
-PATH="$FAKE_BIN:$PATH" \
+AGY_BIN="$FAKE_AGY" \
 REVIEW_DIR="$REVIEW_ROOT" \
 GEMINI_REVIEW_MODEL='gemini-9-unknown-high' \
   "$WRAPPER" unknown 'This must fail model validation.' "$PROJECT_ROOT" >/dev/null 2>&1

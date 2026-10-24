@@ -44,3 +44,20 @@ if "$EXTRACT" "$TEST_DIR/invalid.json" > "$TEST_DIR/invalid.md" 2>/dev/null; the
   exit 1
 fi
 printf '%s\n' 'ok - invalid JSON rejected'
+
+printf '%s\n' '{"status":"SUCCESS","response":"prose that must lose","structured_output":{"verdict":"approve","summary":"s","findings":[],"checked":["a.py"],"next_steps":[]}}' > "$TEST_DIR/structured.json"
+"$EXTRACT" "$TEST_DIR/structured.json" > "$TEST_DIR/structured.out"
+[ "$(wc -l < "$TEST_DIR/structured.out" | tr -d ' ')" = '1' ] || { echo 'not ok - structured_output not compact' >&2; exit 1; }
+grep -Fq '"verdict":"approve"' "$TEST_DIR/structured.out" || { echo 'not ok - structured_output not emitted' >&2; exit 1; }
+if grep -Fq 'prose that must lose' "$TEST_DIR/structured.out"; then
+  echo 'not ok - response emitted despite structured_output' >&2
+  exit 1
+fi
+printf '%s\n' 'ok - structured_output object preferred over response'
+
+printf '%s\n' '{"status":"SUCCESS","response":"  \n ","denied_actions":[{"action":"command"}]}' > "$TEST_DIR/empty.json"
+if "$EXTRACT" "$TEST_DIR/empty.json" > "$TEST_DIR/empty.out" 2>/dev/null; then
+  echo 'not ok - empty response without structured_output was accepted' >&2
+  exit 1
+fi
+printf '%s\n' 'ok - empty response without structured_output rejected'
