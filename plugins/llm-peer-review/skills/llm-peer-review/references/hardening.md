@@ -123,16 +123,20 @@ Rå output ligger i `scripts/fixtures/`.
 
 ### AGY (Gemini)
 
-Fælles flag: `agy -p <prompt> --model <models.sh gemini> --output-format json
---json-schema <schemafil> --add-dir "$P" --add-dir "$R" --disable-slash-commands
---print-timeout 300s`, kørt med cwd `$P`. Skriveproben var prompten "Create the
-file PROBE.txt containing hi" (uden schema).
+Fælles flag for a-c: `agy -p <prompt> --model <models.sh gemini> --output-format
+json --json-schema <schemafil> --add-dir "$P" --add-dir "$R"
+--disable-slash-commands --print-timeout 300s`, kørt med cwd `$P`. Variant d
+bruger de samme flag, men **uden** `--disable-slash-commands` og med omvendt
+rækkefølge: `--add-dir "$R" --add-dir "$P"`, så projektet er sidst.
+Skriveproben var prompten "Create the file PROBE.txt containing hi" (uden
+schema).
 
 | Variant | Ekstra flag | Review headless | `PROBE.txt` opstod |
 | --- | --- | --- | --- |
 | a | `--dangerously-skip-permissions` | Ja, 46 s, 2 findings | Ja, i `$R` |
 | b | `--mode plan --sandbox` | Nej. Tom `.response` | Nej. `write_file` blev afvist |
 | c | `--sandbox --dangerously-skip-permissions` | Ja, 89 s, 2 findings | Ja, i `$R` |
+| d | `--mode plan --sandbox --dangerously-skip-permissions` | Ja, 89 s, 2 findings | Nej, hverken i `$P` eller `$R` |
 
 - Når skemaet virker, har envelopen `.structured_output` (objekt), `.response`
   (samme JSON som rå streng, **uden** fence) og et ekko af schemaet i
@@ -140,9 +144,11 @@ file PROBE.txt containing hi" (uden schema).
 - Variant b gav `status: "SUCCESS"` og exit 0, selvom `.response` var tom.
   `denied_actions` var `[{"action":"command","display_name":"RunCommand"}]`.
   På stderr stod: `warning: --mode plan has no effect while slash command
-  expansion is disabled.` Plan-mode var altså ikke aktiv. Blokeringen kom af,
-  at `--dangerously-skip-permissions` manglede, så headless-tilstanden afviste
-  alle tools, også læsning via `RunCommand`.
+  expansion is disabled.` Plan-mode var altså ikke aktiv. Formodentlig kom
+  blokeringen af, at `--dangerously-skip-permissions` manglede, så headless-
+  tilstanden afviste tools, der krævede tilladelse. Det er en slutning ud fra
+  `denied_actions` og stderr: kun `RunCommand` (review) og `WriteFile` (probe)
+  blev faktisk observeret afvist.
   `status: "SUCCESS"` og exit 0 beviser derfor ikke et
   svar. En tom `.response` eller ikke-tomme `denied_actions` skal regnes som
   fejl.
@@ -150,18 +156,35 @@ file PROBE.txt containing hi" (uden schema).
   stadig.
 - Skriveproben skrev i den **sidste** `--add-dir` (`$R`), ikke i cwd/projektet.
   Hvis run-mappen gives som `--add-dir`, kan en skrivning undgå
-  projektmanifestet. Run-mappen bør derfor ikke gives til AGY som `--add-dir`,
-  eller den skal også kontrolleres.
-- Fixture: `scripts/fixtures/agy-envelope.json` (variant a, 2 findings).
+  projektmanifestet. Projektmappen skal derfor altid være den **sidste**
+  `--add-dir`. Run-mappen bør helst slet ikke gives til AGY som `--add-dir`, og
+  ellers skal den også kontrolleres.
+- Variant d (plan-mode aktiv): reviewet fuldførte med samme envelope-struktur
+  som a (samme top-level nøgler, `.response` er rå JSON uden fence,
+  `denied_actions` er fraværende). Ved skriveproben skrev agenten ikke filen.
+  Den svarede med en implementeringsplan og bad om godkendelse ("Once approved,
+  I will proceed"). Planen lå i AGY's egen tilstandsmappe
+  `~/.gemini/antigravity-cli/brain/<conversation_id>/create_probe_file.md`, uden
+  for `$P` og `$R`. Der var ingen `denied_actions`. Spærringen er altså plan-
+  mode-workflowet, ikke en verificeret afvisning i tool-laget.
+- Fixture: `scripts/fixtures/agy-envelope.json` (variant a, 2 findings). Envelopen
+  fra d er strukturelt identisk, så der er ingen separat fixture.
 
 ### Beslutning
 
-Regel: vælg den første variant i rækkefølgen b, c, a, som både fuldfører
-reviewet og ikke skaber `PROBE.txt`. Ingen variant opfylder begge krav. b
-blokerer skrivning, men fuldfører ikke. c og a fuldfører, men skriver.
-Fallback-reglen gælder derfor: c fuldførte, så standarden for Task 6 er
-**(a) + `--sandbox`**, altså variant c:
-`--sandbox --dangerously-skip-permissions`.
+Første runde: vælg den første variant i rækkefølgen b, c, a, som både
+fuldfører reviewet og ikke skaber `PROBE.txt`. Ingen variant opfyldte begge
+krav. b blokerer skrivning, men fuldfører ikke. c og a fuldfører, men skriver.
+Fallback-reglen ("hvis ingen variant blokerer skrivning") er læst som "hvis
+ingen *brugbar* variant blokerer skrivning", fordi b slet ikke kan levere et
+review. Dermed blev c (= a + `--sandbox`) foreløbig standard.
 
-Read-only for AGY håndhæves stadig kun af prompten og indholdsmanifestet. Der er
-ingen teknisk skriveblokering.
+b var konfunderet (plan-mode inaktiv, ingen skip-permissions), så d blev kørt
+bagefter. d fuldførte reviewet, og `PROBE.txt` opstod hverken i `$P` eller
+`$R`. **Standarden for Task 6 er derfor variant d**:
+`--mode plan --sandbox --dangerously-skip-permissions`, med projektmappen som
+sidste `--add-dir`. `--disable-slash-commands` skal **fjernes** fra AGY-kaldet,
+fordi plan-mode ellers ikke har nogen effekt. c er fallback.
+
+Plan-mode stopper skrivning i workflowet, men det er ikke en verificeret
+skriveblokering i tool-laget. Indholdsmanifestet er stadig obligatorisk.
