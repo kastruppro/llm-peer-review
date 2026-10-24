@@ -1,0 +1,21 @@
+{
+  "name": "kastruppro-peer-review",
+  "owner": {
+    "name": "Tobias Jul Kastrup"
+  },
+  "metadata": {
+    "description": "Independent three-LLM peer review (Claude, Gemini, Codex) for Claude Code.",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "llm-peer-review",
+      "description": "Run three independent LLM reviews (Claude, Gemini, Codex) in parallel and aggregate schema-valid verdicts into an evidence-based consensus.",
+      "version": "1.0.0",
+      "author": {
+        "name": "Tobias Jul Kastrup"
+      },
+      "source": "./plugins/llm-peer-review"
+    }
+  ]
+}
