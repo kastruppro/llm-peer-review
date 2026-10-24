@@ -10,6 +10,8 @@ FAKE_BIN="$T/bin"
 FAKE_HOME="$T/home"
 PROJ="$T/my project"
 CALLS="$T/calls.log"
+FAKE_MARKER=$((30000 + $$ % 20000)) # unique sleep duration: pgrep -f "sleep $FAKE_MARKER" finds leftovers
+export FAKE_MARKER
 mkdir -p "$FAKE_BIN" "$FAKE_HOME/.gemini/antigravity-cli" "$T/tmp"
 trap 'rm -rf -- "$T"' EXIT
 
@@ -35,7 +37,7 @@ done
 case "$shared" in */shared) [ -d "$shared" ] || exit 96 ;; *) exit 96 ;; esac
 [ -n "$schema" ] || exit 95
 [ -n "${*: -1}" ] || exit 94
-if [ "${FAKE_CLAUDE_MODE:-}" = hang ]; then exec sleep 60; fi
+if [ "${FAKE_CLAUDE_MODE:-}" = hang ]; then exec sleep "$FAKE_MARKER"; fi
 if [ "${FAKE_CLAUDE_MODE:-}" = error ]; then
   printf '%s\n' '{"is_error":true,"subtype":"error_during_execution","result":"fake failure for the test"}'
   exit 0
@@ -67,6 +69,13 @@ if [ "${1:-}" = "models" ]; then
 fi
 echo agy >> "$CALL_LOG"
 if [ "${FAKE_AGY_MODE:-}" = probe ]; then echo probe > "$FAKE_PROBE_DIR/PROBE.txt"; fi
+if [ "${FAKE_AGY_MODE:-}" = hang ]; then
+  # A grandchild that writes into the project after a delay, plus a hanging agy.
+  bash -c 'sleep "$1"; echo late > "$2/LATE.txt"' "marker-$FAKE_MARKER" "${FAKE_WRITER_DELAY:-6}" "$FAKE_PROBE_DIR" &
+  if [ -n "${FAKE_EARLY_WRITE:-}" ]; then echo early > "$FAKE_PROBE_DIR/EARLY.txt"; fi
+  sleep "$FAKE_MARKER"
+  exit 0
+fi
 cat "$FAKE_FIXTURES/agy-envelope.json"
 FAKE
 chmod +x "$FAKE_BIN/claude" "$FAKE_BIN/codex" "$FAKE_BIN/agy"
@@ -125,7 +134,8 @@ FAKE_AGY_MODE=probe run_rr --root "$PROJ"
 check "no aggregate.md after snapshot change" test ! -e "$RD/aggregate.md"
 check "snapshot diff is reported on stderr" grep -Fq 'PROBE.txt' "$T/err"
 
-# 4. Claude error envelope: exit 1, claude ERROR, MANGLER in the aggregate.
+# 4. Claude error envelope (the fake prints a long error body: classify-review.sh
+# reports bodies under 40 bytes as EMPTY, so a bare {"is_error":true} would never reach ERROR): exit 1, claude ERROR, MANGLER in the aggregate.
 mkproj dirty
 FAKE_CLAUDE_MODE=error run_rr --root "$PROJ"
 [ "$RC" -eq 1 ] && ok "failed voice exits 1" || { fail "failed voice exits 1 (rc=$RC)"; cat "$T/err" >&2; }
@@ -147,6 +157,39 @@ FAKE_CLAUDE_MODE=hang REVIEW_MAX_ITER=3 run_rr --root "$PROJ" --voices claude
 [ "$RC" -eq 2 ] && ok "watcher timeout exits 2" || fail "watcher timeout exits 2 (rc=$RC)"
 check "timeout writes verdicts.txt" test -f "$RD/verdicts.txt"
 check "timeout writes no aggregate.md" test ! -e "$RD/aggregate.md"
+check "timeout left no hung fake process" test -z "$(pgrep -f "sleep $FAKE_MARKER")"
+
+# 5c. Timeout stops the whole Gemini tree: the late-writing grandchild must never write.
+mkproj dirty
+rm -f "$PROJ/LATE.txt"
+FAKE_AGY_MODE=hang FAKE_WRITER_DELAY=6 REVIEW_MAX_ITER=4 run_rr --root "$PROJ" --voices gemini
+[ "$RC" -eq 2 ] && ok "gemini timeout exits 2" || { fail "gemini timeout exits 2 (rc=$RC)"; cat "$T/err" >&2; }
+check "gemini timeout writes no aggregate.md" test ! -e "$RD/aggregate.md"
+sleep 8
+check "late write never happened" test ! -e "$PROJ/LATE.txt"
+check "no fake process remains after gemini timeout" test -z "$(pgrep -f "marker-$FAKE_MARKER|sleep $FAKE_MARKER")"
+
+# 5d. A voice that modified the project before the timeout: exit 4 outranks the timeout.
+mkproj dirty
+FAKE_AGY_MODE=hang FAKE_EARLY_WRITE=1 FAKE_WRITER_DELAY=30 REVIEW_MAX_ITER=4 run_rr --root "$PROJ" --voices gemini
+[ "$RC" -eq 4 ] && ok "modification plus timeout exits 4" || { fail "modification plus timeout exits 4 (rc=$RC)"; cat "$T/err" >&2; }
+check "exit 4 on timeout writes no aggregate.md" test ! -e "$RD/aggregate.md"
+check "exit 4 diff names the written file" grep -Fq 'EARLY.txt' "$T/err"
+check "no fake process remains after exit 4" test -z "$(pgrep -f "marker-$FAKE_MARKER|sleep $FAKE_MARKER")"
+
+# 5e. SIGTERM to run-review.sh stops the voices and exits 143.
+mkproj dirty
+: > "$CALLS"
+env PATH="$FAKE_BIN:$PATH" HOME="$FAKE_HOME" TMPDIR="$T/tmp" PEERREVIEW_CODEX_BIN="$FAKE_BIN/codex" \
+  PEERREVIEW_AGY_SYSTEM_PATHS="" REVIEW_POLL_INTERVAL=1 REVIEW_STALE_ITERS=20 CALL_LOG="$CALLS" \
+  FAKE_FIXTURES="$FIX" FAKE_CLAUDE_MODE=hang \
+  bash "$RUN" --root "$PROJ" --voices claude > "$T/out" 2> "$T/err" < /dev/null &
+RRPID=$!
+i=0; while [ "$i" -lt 20 ] && [ -z "$(pgrep -f "sleep $FAKE_MARKER")" ]; do sleep 0.5; i=$((i + 1)); done
+kill -TERM "$RRPID" 2>/dev/null
+wait "$RRPID"; RC=$?
+[ "$RC" -eq 143 ] && ok "SIGTERM exits 143" || fail "SIGTERM exits 143 (rc=$RC)"
+check "SIGTERM left no fake process" test -z "$(pgrep -f "sleep $FAKE_MARKER")"
 
 # 6. Clean tree on main: nothing to review, exit 3.
 mkproj clean

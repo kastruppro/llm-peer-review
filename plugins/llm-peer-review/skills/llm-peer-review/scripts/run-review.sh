@@ -13,9 +13,12 @@
 # Exit codes:
 #   0  every selected voice is VALID/CLEAN
 #   1  at least one selected voice is missing/invalid; aggregate.md is written
-#   2  preflight, wiring, watcher failure or watcher timeout (no aggregate)
+#   2  preflight, wiring, watcher failure or watcher timeout (no aggregate); the
+#      voice process trees are stopped first
+#   130/143  interrupted (INT/TERM); voices stopped, run dir kept
 #   3  nothing to review (from prepare_review.py)
-#   4  the project changed while the reviewers ran (snapshot diff; no aggregate)
+#   4  the project changed while the reviewers ran (snapshot diff; no aggregate),
+#      also checked after a watcher failure/timeout
 #
 # Watcher timing knobs (env): REVIEW_POLL_INTERVAL, REVIEW_MAX_ITER, REVIEW_STALE_ITERS.
 set -u
@@ -132,8 +135,75 @@ PROMPT="$(cat "$REVIEW_DIR/shared/prompt.md")"
 python3 -I "$SCRIPT_DIR/snapshot.py" "$PROJECT_ROOT" > "$REVIEW_DIR/snapshot.before.json" \
   || die "snapshot before the review failed"
 
+# --- Process control ---------------------------------------------------------
+CLAUDE_PID=0; CODEX_PID=0; GEMINI_PID=0; WATCH_PID=0
+
+is_alive() { # alive and not a zombie (kill -0 succeeds on unreaped zombies)
+  local st
+  st="$(ps -o stat= -p "$1" 2>/dev/null | tr -d ' ')"
+  [ -n "$st" ] && case "$st" in Z*) return 1 ;; esac
+  return 0
+}
+
+collect_tree() { # print PID and all descendants (parents first)
+  local c
+  echo "$1"
+  for c in $(pgrep -P "$1" 2>/dev/null); do collect_tree "$c"; done
+}
+
+group_alive() { # any non-zombie process left in process group $1?
+  ps -axo pgid=,stat= 2>/dev/null | awk -v g="$1" '$1 == g && $2 !~ /^Z/ { f = 1 } END { exit !f }'
+}
+
+# Stop every voice process tree. Each voice is a background job started under
+# `set -m`, so it leads its own process group and descendants that were orphaned
+# (the watcher itself kills only the wrapper PID on timeout) stay reachable via
+# the group. A recursive PID walk covers anything that left the group. TERM,
+# short grace period, KILL survivors, reap our own children. A process group
+# cannot be reused by an unrelated process while it has members, and individual
+# PIDs are only signalled while still alive.
+stop_voices() {
+  local p q all="" i alive
+  for p in $CLAUDE_PID $CODEX_PID $GEMINI_PID; do
+    [ "$p" != "0" ] && is_alive "$p" && all="$all $(collect_tree "$p")"
+  done
+  for p in $CLAUDE_PID $CODEX_PID $GEMINI_PID; do
+    [ "$p" != "0" ] && group_alive "$p" && kill -TERM -- "-$p" 2>/dev/null
+  done
+  for q in $all; do is_alive "$q" && kill -TERM "$q" 2>/dev/null; done
+  i=0
+  while [ "$i" -lt 10 ]; do
+    alive=0
+    for q in $all; do is_alive "$q" && alive=1; done
+    for p in $CLAUDE_PID $CODEX_PID $GEMINI_PID; do
+      [ "$p" != "0" ] && group_alive "$p" && alive=1
+    done
+    [ "$alive" -eq 0 ] && break
+    sleep 0.5
+    i=$((i + 1))
+  done
+  for p in $CLAUDE_PID $CODEX_PID $GEMINI_PID; do
+    [ "$p" != "0" ] && group_alive "$p" && kill -KILL -- "-$p" 2>/dev/null
+  done
+  for q in $all; do is_alive "$q" && kill -KILL "$q" 2>/dev/null; done
+  for p in $CLAUDE_PID $CODEX_PID $GEMINI_PID; do
+    [ "$p" != "0" ] && wait "$p" 2>/dev/null
+  done
+  return 0
+}
+
+on_signal() { # on_signal <exit-code>
+  trap '' INT TERM
+  [ "$WATCH_PID" != "0" ] && kill "$WATCH_PID" 2>/dev/null
+  stop_voices
+  echo "run-review: interrupted; voices stopped (run dir kept: $REVIEW_DIR)" >&2
+  exit "$1"
+}
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
+
 # --- Launch the selected voices in parallel ----------------------------------
-CLAUDE_PID=0; CODEX_PID=0; GEMINI_PID=0
+set -m   # every background job leads its own process group (see stop_voices)
 CLAUDE_SYSTEM="You are one standalone code reviewer, not an orchestrator. Read the code yourself. Never launch agents or other reviewers. Never modify files. Return only concrete review findings with file:line evidence."
 
 if [ "$WANT_CLAUDE" -eq 1 ]; then
@@ -184,8 +254,11 @@ if [ "$WANT_CODEX" -eq 1 ]; then
 fi
 
 # --- Wait --------------------------------------------------------------------
-"$SCRIPT_DIR/wait-for-reviewers.sh" "$RID" "$CLAUDE_PID" "$CODEX_PID" "$GEMINI_PID"
+"$SCRIPT_DIR/wait-for-reviewers.sh" "$RID" "$CLAUDE_PID" "$CODEX_PID" "$GEMINI_PID" &
+WATCH_PID=$!
+wait "$WATCH_PID"
 WATCH_RC=$?
+WATCH_PID=0
 printf 'watcher exit=%s\n' "$WATCH_RC"
 
 voice_file() { # voice_file <voice> -> the published output path the watcher expects
@@ -211,23 +284,30 @@ write_verdicts() {
   done
 }
 
+snapshot_changed() { # snapshot after; print the diff on stderr; 0 = unchanged
+  python3 -I "$SCRIPT_DIR/snapshot.py" "$PROJECT_ROOT" > "$REVIEW_DIR/snapshot.after.json" \
+    || die "snapshot after the review failed"
+  diff -u "$REVIEW_DIR/snapshot.before.json" "$REVIEW_DIR/snapshot.after.json" >&2 && return 1
+  return 0
+}
+
 case "$WATCH_RC" in
   0|1) ;;
   *)
-    # Wiring error or timeout: stop what still runs, record what exists, no aggregate.
-    for p in $CLAUDE_PID $CODEX_PID $GEMINI_PID; do
-      [ "$p" != "0" ] && kill "$p" 2>/dev/null
-    done
+    # Wiring error or timeout: stop every voice tree first, then check the project.
+    stop_voices
     write_verdicts
+    if snapshot_changed; then
+      echo "run-review: the project changed while the reviewers ran (see the diff above); watcher exit $WATCH_RC; no aggregate written." >&2
+      exit 4
+    fi
     echo "run-review: watcher failed (exit $WATCH_RC); no aggregate written" >&2
     exit 2
     ;;
 esac
 
 # --- Read-only invariant -----------------------------------------------------
-python3 -I "$SCRIPT_DIR/snapshot.py" "$PROJECT_ROOT" > "$REVIEW_DIR/snapshot.after.json" \
-  || die "snapshot after the review failed"
-if ! diff -u "$REVIEW_DIR/snapshot.before.json" "$REVIEW_DIR/snapshot.after.json" >&2; then
+if snapshot_changed; then
   echo "run-review: the project changed while the reviewers ran (see the diff above); no aggregate written. Re-run on a stable snapshot." >&2
   exit 4
 fi
