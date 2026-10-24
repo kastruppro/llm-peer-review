@@ -60,6 +60,10 @@ PEER_FOCUS_EOF
 # ... --focus "$FOCUS"
 ```
 
+Indeholder teksten en linje identisk med afgrænseren (`PEER_FOCUS_EOF`), så vælg en
+anden, unik afgrænser (fx med tilfældige tegn tilføjet), som ikke findes i teksten.
+Fjern eller ændr aldrig fokusteksten.
+
 `--scope` skal være `auto|working-tree|branch|full`, og `--base` et almindeligt
 ref-navn uden mellemrum eller shell-metategn (ellers spørg brugeren).
 
