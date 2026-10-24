@@ -11,12 +11,11 @@ PROJECT_ROOT="$TEST_DIR/project"
 COUNTER="$TEST_DIR/agy-counter"
 mkdir -p "$FAKE_BIN" "$REVIEW_ROOT" "$PROJECT_ROOT"
 
+HANG_SECS=$((40000 + $$ % 20000)) # unique sleep duration, so leftovers are findable
 cleanup() {
-  local fixture
-  for fixture in "$REVIEW_ROOT"/* "$FAKE_BIN"/* "$TEST_DIR"/*; do
-    [ -f "$fixture" ] && rm -f -- "$fixture"
-  done
-  rmdir "$REVIEW_ROOT" "$PROJECT_ROOT" "$FAKE_BIN" "$TEST_DIR" 2>/dev/null || true
+  # The hang fake leaves a TERM-ignoring descendant on purpose; never leave it behind.
+  pkill -KILL -f "gemini-hang-$$|sleep $HANG_SECS" 2>/dev/null || true
+  rm -rf -- "$TEST_DIR"
 }
 trap cleanup EXIT
 
@@ -101,7 +100,7 @@ set -e
 [ "$UNKNOWN_RC" -eq 64 ]
 
 # Attempt timeout: a descendant that ignores TERM must be KILLed, not left running.
-export HANG_MARK="gemini-hang-$$"
+export HANG_MARK="gemini-hang-$$" HANG_SECS
 HANG_AGY="$FAKE_BIN/agy-hang"
 rm -f "$COUNTER"
 cat > "$HANG_AGY" <<'FAKE'
@@ -110,8 +109,8 @@ if [ "${1:-}" = "models" ]; then printf '%s\n' "$FAKE_GEMINI_ID"; exit 0; fi
 COUNT=0; [ -f "$AGY_FAKE_COUNTER" ] && COUNT="$(sed -n 1p "$AGY_FAKE_COUNTER")"
 COUNT=$((COUNT + 1)); printf '%s\n' "$COUNT" > "$AGY_FAKE_COUNTER"
 if [ "$COUNT" -eq 1 ]; then
-  bash -c 'trap "" TERM; sleep 60' "$HANG_MARK" </dev/null >/dev/null 2>&1 &
-  exec sleep 60
+  bash -c 'trap "" TERM; sleep "$1"' "$HANG_MARK" "$HANG_SECS" </dev/null >/dev/null 2>&1 &
+  exec sleep "$HANG_SECS"
 fi
 printf '%s\n' '{"status":"SUCCESS","response":"{\"verdict\":\"approve\",\"summary\":\"s\",\"findings\":[],\"checked\":[\"a.py\"],\"next_steps\":[]}"}'
 FAKE
@@ -119,8 +118,7 @@ chmod +x "$HANG_AGY"
 AGY_BIN="$HANG_AGY" REVIEW_DIR="$REVIEW_ROOT" GEMINI_ATTEMPT_CAP=5 \
   "$WRAPPER" hang 'Review with a hanging first attempt.' "$PROJECT_ROOT" >/dev/null 2>&1
 [ -f "$REVIEW_ROOT/review_gemini_hang.VOICE" ]
-if pgrep -f "$HANG_MARK" >/dev/null; then
-  pkill -KILL -f "$HANG_MARK"
+if pgrep -f "$HANG_MARK|sleep $HANG_SECS" >/dev/null; then
   echo 'not ok - a TERM-ignoring descendant survived the attempt timeout' >&2
   exit 1
 fi

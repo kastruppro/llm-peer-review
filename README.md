@@ -50,7 +50,7 @@ Kopiér eller symlink den til Codex' skills-mappe og start med `$llm-peer-review
 
 ## Krav
 
-`claude`, `agy` (med login eller `ANTIGRAVITY_API_KEY`), `codex`, `python3` (kun stdlib) og `/bin/bash` 3.2+. Modelnavne står kun i `scripts/models.json`.
+`claude`, `agy` (med login eller `ANTIGRAVITY_API_KEY`), `codex`, `git`, `jq`, `python3` (kun stdlib) og `/bin/bash` 3.2+. Modelnavne står kun i `scripts/models.json`.
 
 ## Inspireret af
 

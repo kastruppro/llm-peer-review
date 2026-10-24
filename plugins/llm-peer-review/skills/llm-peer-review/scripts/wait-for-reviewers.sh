@@ -289,7 +289,7 @@ while [ $ITER -lt $MAX_ITER ]; do
     if [ "$C_STATE" = "done" ] && [ -z "$CLASS_CLAUDE" ]; then
       CLASS_CLAUDE=$(classify_review "$CLAUDE_FILE" 2>/dev/null)
       if [ "$CLASS_CLAUDE" != "VALID" ] && [ "$CLASS_CLAUDE" != "CLEAN" ]; then
-        echo "WARN: claude produced no usable review (verdict=$CLASS_CLAUDE) - relaunch with no-tools Mode A" >&2
+        echo "WARN: claude produced no usable review (verdict=$CLASS_CLAUDE) - relaunch once (SKILL.md §4)" >&2
         tail -6 "$CLAUDE_FILE" >&2; SAW_ERROR=1
       fi
     fi

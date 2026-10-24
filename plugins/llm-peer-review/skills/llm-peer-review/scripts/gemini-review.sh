@@ -3,12 +3,11 @@
 #
 # 2026-06-19 REWRITE: the standalone Google `gemini` CLI is deprecated and the
 # CCS-proxy path (`ccs gemini -p`, claude-binary-via-proxy) is replaced by
-# Google's native Antigravity CLI `agy`. The model is now a real Gemini served
-# by Google directly - default "gemini-3.8-flash-high" (override with
-# GEMINI_REVIEW_MODEL). The script keeps the EXACT same calling contract so
-# dependent skills (analyse-codebase, overnight-autonomous, llm-peer-review §6)
-# work unchanged, and so an autonomous agent still has ONE command it cannot get
-# wrong (instead of improvising an unhardened call - see SKILL.md "Hærdning").
+# Google's native Antigravity CLI `agy`. The model is a real Gemini served by
+# Google directly - default from models.json (`models.sh gemini`); run-review.sh
+# passes it as GEMINI_REVIEW_MODEL. The script keeps ONE calling contract
+# (used by run-review.sh), so an autonomous agent has ONE command it cannot get
+# wrong (instead of improvising an unhardened call - see references/hardening.md).
 #
 # OUTPUT FORMAT (important for consumers): `agy` runs with `--output-format json`
 # and `--json-schema schemas/review-output.schema.json`. Each raw envelope is
@@ -43,18 +42,20 @@
 #   GEMINI_REVIEW_OUT_BASE  optional output base override inside REVIEW_DIR
 #   GEMINI_REVIEW_ACCEPT    'valid' (default; accepts VALID or attested CLEAN) or
 #                           'response' (also accepts WEAK - analysis docs)
-#   GEMINI_REVIEW_MODEL     exact agy model ID (default
-#                           "gemini-3.8-flash-high"; e.g.
-#                           "gemini-3.1-pro-high" for the Pro tier)
+#   GEMINI_REVIEW_MODEL     exact agy model ID (default: `models.sh gemini`,
+#                           i.e. gemini.model in models.json; run-review.sh
+#                           always sets it from there)
 #   GEMINI_ATTEMPT_CAP      seconds per attempt (default 900)
 #   AGY_BIN                 agy executable (default `agy` from PATH; set it from
 #                           `preflight.sh agy-path`)
 #
 # Writes (matching what wait-for-reviewers.sh expects):
-#   ${BASE}.json                    published extracted final response (markdown)
+#   ${BASE}.json                    published final payload: the review JSON
+#                                   (or the error body of the last attempt)
 #   ${BASE}.err                     combined attempt diagnostics
 #   ${BASE}.attemptN.raw.json       complete immutable agy JSON envelope
-#   ${BASE}.attemptN.final.md       extracted `.response` only
+#   ${BASE}.attemptN.final.md       extracted payload only (`.structured_output`,
+#                                   else `.response`); the .md suffix is historical
 #   ${BASE}.attemptN.err            agy/extraction stderr
 #   ${BASE}.attemptN.classify.txt   verdict, exit code, and classifier counters
 #   ${BASE}.VOICE                   which voice won (GEMINI:agy)
@@ -98,13 +99,13 @@ case "$MODEL" in
   -*) echo "[gemini-review] GEMINI_REVIEW_MODEL must not start with '-' (option injection): $MODEL" >&2; exit 64 ;;
 esac
 # FAMILY-DIVERSITY GUARD: this is the GEMINI (Google-family) voice. `agy` also
-# exposes Claude (Sonnet/Opus 4.6) and GPT-OSS models, but routing this voice
+# exposes Anthropic and OpenAI-family models, but routing this voice
 # through Claude would collapse llm-peer-review's Anthropic/Google/OpenAI diversity
 # into two Claude voices (the skill's "aldrig en 2. Claude" rule). Only accept a
 # lowercase `gemini-...` CLI model ID here.
 case "$MODEL" in
   gemini-*) ;;
-  *) echo "[gemini-review] GEMINI_REVIEW_MODEL must be an exact lowercase Gemini CLI model ID (got: '$MODEL'). This is the Google-family voice - never route it through Claude/GPT via agy; it breaks family diversity. Examples: 'gemini-3.8-flash-high', 'gemini-3.1-pro-high'." >&2; exit 64 ;;
+  *) echo "[gemini-review] GEMINI_REVIEW_MODEL must be an exact lowercase Gemini CLI model ID (got: '$MODEL'). This is the Google-family voice - never route it through Claude/GPT via agy; it breaks family diversity. Set gemini.model in models.json (see 'models.sh gemini')." >&2; exit 64 ;;
 esac
 
 AGY="${AGY_BIN:-agy}"
@@ -196,8 +197,8 @@ SYS_DEFENSIVE="You are a senior software engineer reviewing your own team's code
 # look for under the security-framed prompt). Surgical word-softening proved too
 # weak: leaving "injection"/"path traversal"/"find ... risks" still tripped the
 # filter. Any inlined fenced diff/code block IS the review's substance, so it is
-# preserved verbatim; a Mode-B "review the files" prompt has no fence and agy sees
-# the tree via --add-dir.
+# preserved verbatim (prepare_review.py always renders the target block as the
+# prompt's single fence); agy sees the tree via --add-dir.
 NEUTRAL_INSTRUCTION="Review the code for correctness bugs, race conditions and thread-safety, robustness and edge cases, resource and error handling, configuration validation, and careful handling of untrusted input and of any values written into generated output (so a downstream consumer cannot misinterpret them). For each issue: file:line, what is wrong, why it matters, and a concrete fix. Return only JSON matching the provided schema."
 reframe_prompt() {
   local p="$1" fence
@@ -393,7 +394,7 @@ CLS2="$LAST_CLASS"
 {
   echo "Gemini voice SKIPPED $(date '+%Y-%m-%d %H:%M:%S'): both agy attempts rejected (attempt 1: $CLS1, attempt 2: $CLS2)."
   if [ "$CLS1" = "REFUSED" ] || [ "$CLS2" = "REFUSED" ]; then
-    echo "Cause: content-policy refusal that survived even the defensive-framing + neutral-reframe retry. This is a Gemini over-refusal, NOT auth/capacity - relaunching with the same model is unlikely to help; aggregate as a 2-voice (Claude+Codex) review and note the missing Google voice, or try GEMINI_REVIEW_MODEL='gemini-3.1-pro-high'."
+    echo "Cause: content-policy refusal that survived even the defensive-framing + neutral-reframe retry. This is a Gemini over-refusal, NOT auth/capacity - relaunching with the same model is unlikely to help; aggregate as a 2-voice (Claude+Codex) review and note the missing Google voice, or change gemini.model in models.json (see its note for the alternative tier) and relaunch only this voice with run-review.sh --voices gemini."
   else
     echo "Check: 'agy models' (auth/sign-in), network reachability to Google, model name '$MODEL'. stderr: $ERRF"
   fi

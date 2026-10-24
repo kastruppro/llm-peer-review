@@ -22,13 +22,42 @@ holdes adskilt, og outputstier genbruges aldrig på tværs af runs.
 
 Diff og prompt ligger i `shared/` i run-mappen (`target.diff`, `prompt.md`).
 Kun `shared/` gives til reviewerne som ekstra læsbar mappe, aldrig hele
-run-mappen.
+run-mappen. Efter prepare gøres `shared/` read-only (`chmod -R a-w`), og en
+sha256 pr. fil gemmes i `shared.sha256`. Ejeren kan stadig `chmod` tilbage eller
+erstatte mappen, så checksummen er selve kontrollen: den tjekkes igen ved siden
+af snapshotet, både efter en normal kørsel og efter watcher-fejl/timeout, og en
+forskel giver exit `4`.
 
 Read-only er en invariant, som scriptet tjekker: `snapshot.py` tager et
-indholdsmanifest (tracked og ikke-ignorerede untracked filer, filtilstand og
-Git-tilstand) før og efter. En forskel giver exit `4` og ingen aggregering. Det
-er en efterkontrol, ikke skrivebeskyttelse; en ændring som gendannes under
-kørslen kan ikke opdages. Ignorerede filer er uden for scope.
+indholdsmanifest før reviewet (før prepare) og efter. Manifestet dækker tracked
+og ikke-ignorerede untracked filer, filtilstand og Git-tilstand (HEAD, index,
+status) samt Git-kontrolfilerne `HEAD`, `config`, `config.worktree`,
+`packed-refs`, `hooks/**`, `info/**` og `refs/**` i både git-dir og common-dir
+(så linked worktrees, hvor `.git` er en fil, også er dækket). En forskel giver
+exit `4` og ingen aggregering. Inden snapshotet stoppes alle stemmers
+procestræer altid, også efter en normal afslutning, så en efterladt
+efterkommer ikke kan skrive efter `snapshot.after`.
+
+Alle git-kald i `snapshot.py` og `prepare_review.py` kører med
+`-c core.fsmonitor=false -c core.hooksPath=/dev/null`, så en plantet fsmonitor
+eller hook ikke udføres af scriptets egne git-kald. `git diff` kører desuden med
+`--no-ext-diff --no-color --no-textconv`, så brugerens git-config ikke kan
+ændre `target.diff`.
+
+Det er en efterkontrol, ikke skrivebeskyttelse. Manifestet dækker **ikke**:
+
+- en ændring, som gendannes under kørslen;
+- ignorerede filer (`.gitignore`, `info/exclude`);
+- filer uden for projektet, fx AGY's plan-artefakter i
+  `~/.gemini/antigravity-cli/brain/` eller andre stier i `$HOME`;
+- `.git/objects`, logs og andre git-filer uden for listen ovenfor;
+- git-filter-drivere (`filter.<navn>.clean` i `.git/config` plus
+  `.gitattributes`): en stemme, der planter en, opdages (config er hashet),
+  men efter-snapshottets `git status` kan allerede have kørt den.
+
+`PATH` slås op efter `cd "$PROJECT_ROOT"`. Relative `PATH`-indgange (fx `.` eller
+`bin`) kan derfor give en `claude`, `git` eller `jq` fra projektet; hold `PATH`
+absolut. `resolve-codex.py` ignorerer allerede relative indgange.
 
 Modeller resolves altid fra `scripts/models.json` gennem `models.sh`.
 Hardcodede modelnavne bliver hurtigt stale og kan stille fjerne en familie fra
@@ -54,6 +83,13 @@ er JSON (`CAPACITY`, `REFUSED`, `MISFIRE`). Schemaet har bevidst ingen
 
 - `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1` undgår projektets Claude-memory;
   `--setting-sources user` undgår projekt- og lokale settings.
+- `--strict-mcp-config` uden `--mcp-config` starter stemmen uden MCP-servere
+  (brugerens og projektets `.mcp.json` ignoreres). Brugerens plugins og hooks
+  indlæses stadig via `--setting-sources user`.
+- Kandidater til at evaluere (ikke verificeret med et live-kald, derfor ikke
+  brugt): `--safe-mode` (slår skills, plugins, hooks, MCP og CLAUDE.md fra) og
+  `--restricted`. Kræver en måling af, at `--json-schema`, `--tools` og auth
+  stadig virker.
 - Kun `Read,Glob,Grep`; `Agent` og `Task` er forbudt.
 - `--permission-mode dontAsk`, aldrig bypass.
 - Systemprompten erstattes af en single-reviewer-kontrakt, så revieweren ikke
@@ -86,8 +122,9 @@ havner i det manifest-kontrollerede træ. Run-mappen gives aldrig som
 
 Hvis Gemini ændrer projektet, er hele review-snapshotet ugyldigt (exit `4`).
 Intern AGY-dialog og tool-events må aldrig afgive en reviewer-stemme.
-`status: "SUCCESS"` og exit 0 beviser ikke et svar; en tom `.response` eller
-ikke-tomme `denied_actions` er en fejl.
+`status: "SUCCESS"` og exit 0 beviser ikke et svar; en tom `.response` (uden
+`.structured_output`) er en fejl. Ikke-tomme `denied_actions` er en advarsel, der
+skal inspiceres i `attemptN.raw.json`; svaret afvises ikke af den grund.
 
 ## Codex
 
@@ -183,8 +220,8 @@ schema).
   `denied_actions` og stderr: kun `RunCommand` (review) og `WriteFile` (probe)
   blev faktisk observeret afvist.
   `status: "SUCCESS"` og exit 0 beviser derfor ikke et
-  svar. En tom `.response` eller ikke-tomme `denied_actions` skal regnes som
-  fejl.
+  svar. En tom `.response` skal regnes som fejl; ikke-tomme `denied_actions`
+  er en advarsel, der skal inspiceres (se Gemini-afsnittet).
 - `--sandbox` begrænser kun terminalen. AGY's eget `write_file`-tool skriver
   stadig.
 - Skriveproben skrev i den **sidste** `--add-dir` (`$R`), ikke i cwd/projektet.

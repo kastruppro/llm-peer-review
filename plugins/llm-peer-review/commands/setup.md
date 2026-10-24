@@ -1,7 +1,7 @@
 ---
 description: Tjek om Claude-, Gemini- (agy) og Codex-CLI'erne er klar til peer review, og tilbyd installation hvis noget mangler
 disable-model-invocation: true
-allowed-tools: Bash, Read, Write, Glob, Grep, AskUserQuestion
+allowed-tools: Bash, Read, Glob, Grep, AskUserQuestion
 ---
 
 Kør:

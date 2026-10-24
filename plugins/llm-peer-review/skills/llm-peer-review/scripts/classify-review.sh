@@ -2,7 +2,8 @@
 # classify-review.sh - decide whether a reviewer output file is a USABLE review,
 # an orchestrator-roleplay MISFIRE, a CAPACITY/auth failure, a CLI ERROR, or
 # empty/weak. Used by wait-for-reviewers.sh (sourced) and by the aggregation
-# step (executed) to drive detect→relaunch/fallback. See SKILL.md §3a/§5/§6.
+# step (executed) to drive detect→relaunch/fallback. See references/troubleshooting.md
+# (verdict table) and SKILL.md §4 (relaunch).
 #
 # Usage:   classify-review.sh <output-file>      # prints one class word
 # Source:  source classify-review.sh ; classify_review <file>   # function only

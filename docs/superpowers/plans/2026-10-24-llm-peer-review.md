@@ -47,7 +47,7 @@
 **Interfaces:**
 - Produces: skill-træet under `SK`, hvor alle eksisterende tests er grønne under det nye navn.
 
-- [ ] **Step 1: Kopiér og initialisér**
+- [x] **Step 1: Kopiér og initialisér**
 
 ```bash
 cd <repo>
@@ -59,15 +59,15 @@ rsync -a --exclude __pycache__ --exclude 'Gemini-review-output-report-*' \
 printf '__pycache__/\n*.pyc\n' > .gitignore
 ```
 
-- [ ] **Step 2: Omdøb**
+- [x] **Step 2: Omdøb**
 
 Anvend omdøbningen fra Global Constraints med `grep -rl` + `sed -i ''` på alle filer under `SK`. Frontmatter i `SK/SKILL.md` skal have `name: llm-peer-review`.
 
-- [ ] **Step 3: Skriv `AGENTS.md` og `CLAUDE.md`**
+- [x] **Step 3: Skriv `AGENTS.md` og `CLAUDE.md`**
 
 `AGENTS.md`: formål (én linje), layoutet fra Global Constraints, testkommandoen fra Step 4, reglen "modelnavne kun i models.json" og reglen "originalen i OLD må ikke ændres". `CLAUDE.md`: præcis `@AGENTS.md`.
 
-- [ ] **Step 4: Kør alle eksisterende tests**
+- [x] **Step 4: Kør alle eksisterende tests**
 
 Run: `cd "$SK/scripts" && for t in test-*.sh; do bash "$t" || exit 1; done && python3 test-resolve-codex.py`
 Expected: alle `ok`, exit 0.
@@ -75,7 +75,7 @@ Expected: alle `ok`, exit 0.
 Run: `grep -rni triplereview "$SK"`
 Expected: ingen output.
 
-- [ ] **Step 5: Commit** – `git add -A && git commit -m "chore: bootstrap llm-peer-review from triplereview"`
+- [x] **Step 5: Commit** – `git add -A && git commit -m "chore: bootstrap llm-peer-review from triplereview"`
 
 ---
 
@@ -91,11 +91,11 @@ Formålet er at måle, hvordan de rigtige CLI'er opfører sig, så de næste tas
 **Interfaces:**
 - Produces: schemaet (felter herunder) og tre rigtige output-fixtures, som Task 3 og Task 7 bruger.
 
-- [ ] **Step 1: Skriv schemaet**
+- [x] **Step 1: Skriv schemaet**
 
 Udgangspunkt er `plugins/codex/schemas/review-output.schema.json` fra codex-plugin-cc med én tilføjelse. Top-niveau `required: ["verdict","summary","findings","checked","next_steps"]` og `additionalProperties: false`. `verdict`: enum `approve|needs-attention`. `findings[]` har `severity` (enum `critical|high|medium|low`), `title`, `body`, `file`, `line_start`/`line_end` (integer ≥1), `confidence` (number 0-1) og `recommendation`, alle required med `additionalProperties: false`. Nyt felt: `checked` (array af strings). `next_steps` er en array af strings. Brug ikke `minItems`. Strict structured output kan afvise det, så Task 3 håndhæver det i stedet.
 
-- [ ] **Step 2: Lav et throwaway-projekt**
+- [x] **Step 2: Lav et throwaway-projekt**
 
 ```bash
 P="$(mktemp -d /tmp/peer-spike.XXXXXX)"; R="$(mktemp -d /tmp/peer-run.XXXXXX)"
@@ -104,26 +104,26 @@ printf 'def avg(xs):\n    return sum(xs) / (len(xs) - 1)\n' > calc.py
 git diff HEAD > "$R/target.diff"
 ```
 
-- [ ] **Step 3: Claude med schema og `--add-dir`**
+- [x] **Step 3: Claude med schema og `--add-dir`**
 
 Brug Claude-kommandoen fra `SK/SKILL.md` §5 med `--add-dir "$R"` og `--json-schema "$(cat schema)"`. Prompten er "Read $R/target.diff, review calc.py, return JSON per schema". Gem stdout som `fixtures/claude-envelope.json`.
 Expected: `jq '.structured_output.findings | length'` ≥ 1. Notér i hardening.md, om Read af `$R` virkede under `dontAsk`.
 
-- [ ] **Step 4: Codex med `--output-schema`**
+- [x] **Step 4: Codex med `--output-schema`**
 
 Brug Codex-kommandoen fra §5 plus `--output-schema schema`. Gem `--output-last-message` som `fixtures/codex-last.json`.
 Expected: filen er gyldig JSON med `findings`. Notér, om read-only-sandboxen kunne læse `$R/target.diff`.
 
-- [ ] **Step 5: agy med schema samt read-only-probe**
+- [x] **Step 5: agy med schema samt read-only-probe**
 
 Kør `agy -p … --output-format json --json-schema schema --add-dir "$P" --add-dir "$R" --disable-slash-commands` i tre varianter: (a) som nu, med `--dangerously-skip-permissions`; (b) `--mode plan --sandbox` uden skip-permissions; (c) `--sandbox --dangerously-skip-permissions`. Brug review-prompten for hver variant, og derefter en skriveprobe: "Create the file PROBE.txt containing hi".
 Expected: gem envelopen fra (a) som `fixtures/agy-envelope.json`. Notér i hardening.md for hver variant, om reviewet blev færdigt headless, og om `PROBE.txt` opstod. Notér også, om `.response` er rå JSON eller indpakket i en fence.
 
-- [ ] **Step 6: Beslutning, skrevet ind i hardening.md**
+- [x] **Step 6: Beslutning, skrevet ind i hardening.md**
 
 Regel: den første variant i rækkefølgen b, c, a, som både fuldfører reviewet og *ikke* skaber `PROBE.txt`, bliver standard for Task 6. Hvis ingen variant blokerer skrivning, bruges (a) + `--sandbox`, hvis (c) fuldførte, og ellers (a). Notér også det mindste verificerede Codex-version-floor (`codex --version`).
 
-- [ ] **Step 7: Commit** – `git add "$SK/schemas" "$SK/scripts/fixtures" "$SK/references/hardening.md" && git commit -m "feat: review JSON schema and verified CLI fixtures"`
+- [x] **Step 7: Commit** – `git add "$SK/schemas" "$SK/scripts/fixtures" "$SK/references/hardening.md" && git commit -m "feat: review JSON schema and verified CLI fixtures"`
 
 ---
 
@@ -145,7 +145,7 @@ Regel: den første variant i rækkefølgen b, c, a, som både fuldfører reviewe
   - CLI `review_json.py extract FILE` skriver normaliseret JSON (`indent=2`) med exit 0, ellers stderr + exit 65.
   - `classify-review.sh` beholder signaturen `classify_review <file>` (sourced af `wait-for-reviewers.sh` og `gemini-review.sh`) og samme klasseord og exitkoder.
 
-- [ ] **Step 1: Skriv failing tests i `test-review-json.py`** (unittest, samme stil som `test-resolve-codex.py`)
+- [x] **Step 1: Skriv failing tests i `test-review-json.py`** (unittest, samme stil som `test-resolve-codex.py`)
 
 ```python
 def test_real_fixtures_are_valid(self):
@@ -173,24 +173,24 @@ def test_cli_exit_codes(self):  # classify VALID→0, WEAK→5, notjson→8; ext
 
 `CLEAN` og `FINDING` er modul-konstanter i testfilen og bygges efter schemaet.
 
-- [ ] **Step 2: Kør og se testene fejle** – `python3 SK/scripts/test-review-json.py` → `ModuleNotFoundError`/FAIL.
+- [x] **Step 2: Kør og se testene fejle** – `python3 SK/scripts/test-review-json.py` → `ModuleNotFoundError`/FAIL.
 
-- [ ] **Step 3: Implementér `review_json.py`** med signaturerne ovenfor. Ingen `jsonschema`-dependency, så validatoren skrives i hånden. Schemaet indlæses fra `Path(__file__).parent.parent / "schemas/review-output.schema.json"`, så enums ikke dupliker schemaet.
+- [x] **Step 3: Implementér `review_json.py`** med signaturerne ovenfor. Ingen `jsonschema`-dependency, så validatoren skrives i hånden. Schemaet indlæses fra `Path(__file__).parent.parent / "schemas/review-output.schema.json"`, så enums ikke dupliker schemaet.
 
-- [ ] **Step 4: Omskriv `classify_review` i `classify-review.sh`**
+- [x] **Step 4: Omskriv `classify_review` i `classify-review.sh`**
 
 Find `review_json.py` via `"$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"`, så det også virker, når filen sources af watcheren. Rækkefølge: MISSING/EMPTY (uændret) → `python3 review_json.py classify "$f"`. Ved VALID/CLEAN/WEAK/ERROR returneres den klasse. Ved NOTJSON fortsætter den eksisterende fejlkæde `err` → `caphard` → `refuse` → `capsoft` → `mis`, og ellers WEAK. Slet `loc`, `top`, `structured`, `nofindings`, `checked`, `ok` og `_checked_count`. Opdatér header-kommentaren med en linje, der forklarer, at gyldighed nu afgøres af JSON-schemaet, og at regexen kun bruges til fejl-bodies.
 
-- [ ] **Step 5: Opdatér `test-classify-review.sh`**
+- [x] **Step 5: Opdatér `test-classify-review.sh`**
 
 Slet text-VALID/CLEAN-fixtures (location-, `CHECKED:`- og `NO_FINDINGS`-cases). Behold capacity, refusal, misfire, error og "capacity-tokens citeret i et gyldigt review". Den sidste skal nu være en JSON-fixture, hvis `body` citerer `RESOURCE_EXHAUSTED`, og forventet VALID. Tilføj: de tre fixtures fra Task 2 forventes VALID/0, prosa med `file:line` forventes WEAK/5, og agy-fejl-body'en, som `gemini-review.sh` skriver (`AGY did not produce…` + `{"is_error":true}`), forventes ERROR/6.
 
-- [ ] **Step 6: Slet de erstattede extractors** – `git rm SK/scripts/extract-review-output.sh SK/scripts/test-extract-review-output.sh`. Grep efter `extract-review-output` i `SK` skal kun give de steder i SKILL.md/references, som Task 8 omskriver.
+- [x] **Step 6: Slet de erstattede extractors** – `git rm SK/scripts/extract-review-output.sh SK/scripts/test-extract-review-output.sh`. Grep efter `extract-review-output` i `SK` skal kun give de steder i SKILL.md/references, som Task 8 omskriver.
 
-- [ ] **Step 7: Kør tests** – `python3 SK/scripts/test-review-json.py && bash SK/scripts/test-classify-review.sh && bash SK/scripts/test-gemini-review.sh`
+- [x] **Step 7: Kør tests** – `python3 SK/scripts/test-review-json.py && bash SK/scripts/test-classify-review.sh && bash SK/scripts/test-gemini-review.sh`
 Expected: alt grønt. `test-gemini-review.sh`'s fake agy returnerer tekst-CLEAN, så dens fixtures skal opdateres til JSON i samme step.
 
-- [ ] **Step 8: Commit** – `git commit -am "feat: schema-based review classification"` (inklusive den nye fil via `git add`).
+- [x] **Step 8: Commit** – `git commit -am "feat: schema-based review classification"` (inklusive den nye fil via `git add`).
 
 ---
 
@@ -206,7 +206,7 @@ Expected: alt grønt. `test-gemini-review.sh`'s fake agy returnerer tekst-CLEAN,
   - `cluster(reviews: dict[str, dict], root: str) -> list[dict]`. Hver klynge har `{"file","line_start","line_end","severity","voices": list[str],"confidence": float,"titles": list[str]}`. To findings fra hvilken som helst voice deler klynge, når normaliseret fil er ens, og linjeintervallerne overlapper efter udvidelse med 3 linjer til hver side. Klyngen tager max severity, max confidence og sorterede unikke voices. Sorteringen er severity-rang (critical > high > medium > low) faldende, så antal voices faldende, så fil og så `line_start`.
   - CLI `review_json.py aggregate --root ROOT VOICE=FILE [VOICE=FILE...]` skriver Markdown: først en linje pr. voice med dens klasse (filer der ikke er VALID/CLEAN markeres `MANGLER (<klasse>)`), derefter tabellen `| # | Severity | Location | Voices | Conf | Titles |` med `Location` = `file:line_start-line_end`. Exit 0.
 
-- [ ] **Step 1: Failing tests**
+- [x] **Step 1: Failing tests**
 
 ```python
 def test_path_variants_merge(self):           # Review Focus 4
@@ -222,10 +222,10 @@ def test_aggregate_marks_missing_voice(self):
 
 `f(file, line, severity="high")` bygger et finding, og `rev(*findings)` bygger et gyldigt review.
 
-- [ ] **Step 2: Kør og se FAIL.** – `python3 SK/scripts/test-review-json.py`
-- [ ] **Step 3: Implementér** `normalize_path`, `cluster` og `aggregate`-CLI'en. Klyngedannelse: sortér alle findings efter (fil, `line_start`) og flet et finding ind i den forrige klynge, hvis de overlapper. Klyngens interval udvides løbende.
-- [ ] **Step 4: Kør og se PASS.**
-- [ ] **Step 5: Commit** – `git commit -am "feat: deterministic finding clusters across voices"`
+- [x] **Step 2: Kør og se FAIL.** – `python3 SK/scripts/test-review-json.py`
+- [x] **Step 3: Implementér** `normalize_path`, `cluster` og `aggregate`-CLI'en. Klyngedannelse: sortér alle findings efter (fil, `line_start`) og flet et finding ind i den forrige klynge, hvis de overlapper. Klyngens interval udvides løbende.
+- [x] **Step 4: Kør og se PASS.**
+- [x] **Step 5: Commit** – `git commit -am "feat: deterministic finding clusters across voices"`
 
 ---
 
@@ -243,12 +243,12 @@ def test_aggregate_marks_missing_voice(self):
   - `render_prompt(template: str, target: dict, files: list[str], diff_path: str | None, focus: str) -> str` erstatter `{{TARGET_LABEL}}`, `{{TARGET_BLOCK}}` og `{{USER_FOCUS}}`. `TARGET_BLOCK` er en ```` ```text ````-fence (så Gemini-refusal-reframe i `gemini-review.sh` bevarer den uændret) med mode, absolut diff-sti og fil-listen. I full-mode indeholder den i stedet scope-sætningen fra det gamle `REVIEW_PROMPT`. Tom focus bliver `No extra focus provided.`
   - CLI `prepare_review.py --root ROOT --out DIR [--scope auto] [--base REF] [--adversarial] [--focus TEXT]` skriver `DIR/target.json`, `DIR/target.diff` (kun i diff-modes) og `DIR/prompt.md` og printer label. Exit 0. Tom scope giver exit 3 med beskeden `Intet at reviewe i <label>; brug --scope full eller --base <ref>`. `ValueError` giver exit 2.
 
-- [ ] **Step 1: Skriv de to prompt-templates**
+- [x] **Step 1: Skriv de to prompt-templates**
 
 `review.md`: det gamle `REVIEW_PROMPT`s domæneliste og "ignore style/naming", plus `<grounding_rules>` og `<calibration_rules>` fra codex-plugin-cc `prompts/adversarial-review.md` (opfind aldrig filer eller linjer, markér inferens i `body` og sænk confidence, ét stærkt fund er bedre end flere svage). Derefter read-only-linjen, en instruktion om at læse diff-filen og de berørte filer, "Return only JSON matching the provided schema; list every file or area you inspected in `checked`", samt `{{USER_FOCUS}}`.
 `adversarial-review.md`: codex-plugin-cc's adversarial-prompt med `<repository_context>{{REVIEW_INPUT}}` udskiftet med `{{TARGET_BLOCK}}` og samme JSON-/`checked`-linje. Ret ordet "Codex" til "an independent reviewer".
 
-- [ ] **Step 2: Failing tests** (unittest, temp-git-repos via `subprocess`)
+- [x] **Step 2: Failing tests** (unittest, temp-git-repos via `subprocess`)
 
 ```python
 def test_auto_dirty_is_working_tree(self)       # mode == "working-tree", untracked "new.py" in files
@@ -263,10 +263,10 @@ def test_no_placeholders_left(self)             # both templates: "{{" not in pr
 def test_target_block_is_fenced(self)           # prompt.md contains "```text" and the absolute target.diff path
 ```
 
-- [ ] **Step 3: Kør og se FAIL.** – `python3 SK/scripts/test-prepare-review.py`
-- [ ] **Step 4: Implementér** `prepare_review.py`. Alle `git`-kald bruger `subprocess.run([...], check=...)` med argumentlister og aldrig `shell=True`.
-- [ ] **Step 5: Kør og se PASS.**
-- [ ] **Step 6: Commit** – `git add SK/prompts SK/scripts/prepare_review.py SK/scripts/test-prepare-review.py && git commit -m "feat: review scope selection and prompt templates"`
+- [x] **Step 3: Kør og se FAIL.** – `python3 SK/scripts/test-prepare-review.py`
+- [x] **Step 4: Implementér** `prepare_review.py`. Alle `git`-kald bruger `subprocess.run([...], check=...)` med argumentlister og aldrig `shell=True`.
+- [x] **Step 5: Kør og se PASS.**
+- [x] **Step 6: Commit** – `git add SK/prompts SK/scripts/prepare_review.py SK/scripts/test-prepare-review.py && git commit -m "feat: review scope selection and prompt templates"`
 
 ---
 
@@ -283,12 +283,12 @@ def test_target_block_is_fenced(self)           # prompt.md contains "```text" a
   - `gemini-review.sh` bruger `"${AGY_BIN:-agy}"` overalt i stedet for bar `agy`, og tilføjer `--json-schema "$SKILL_DIR/../schemas/review-output.schema.json"`, `--disable-slash-commands`, `--add-dir "$REVIEW_DIR"` og read-only-flagene, der blev valgt i Task 2 Step 6.
   - `models.json`: `codex.min_cli_version` sættes til floor'et verificeret i Task 2. `updated` sættes til `2026-10-24`. `_README` omdøbes.
 
-- [ ] **Step 1: Failing tests i `test-preflight.sh`** (samme `assert`-stil som `test-classify-review.sh`). Testene bruger en fake `HOME` og `PATH=/usr/bin:/bin`. Når agy kun findes i `$HOME/.local/bin/agy`, skal `agy-path` printe den sti. Uden agy skal exit være 127. Uden `ANTIGRAVITY_API_KEY` og uden `~/.gemini/antigravity-cli` skal `check` vise `agy-auth MISSING` og exit 1.
-- [ ] **Step 2: Udvid fake agy i `test-gemini-review.sh`**, så den kræver `--json-schema`, `--disable-slash-commands`, `--add-dir $REVIEW_DIR` og de valgte read-only-flag (`grep -Fq` som de eksisterende checks), og sæt `AGY_BIN` til fake-stien.
-- [ ] **Step 3: Kør og se FAIL** – `bash SK/scripts/test-preflight.sh; bash SK/scripts/test-gemini-review.sh`.
-- [ ] **Step 4: Implementér** `preflight.sh` og ændringerne i `gemini-review.sh`. `NEUTRAL_INSTRUCTION` og `SYS_DEFENSIVE` får sætningen `Return only JSON matching the provided schema.`, og `Output findings only.` slettes. Hvis Task 2 valgte en variant uden `--dangerously-skip-permissions`, opdateres header-kommentaren "HARDENING DELTA".
-- [ ] **Step 5: Kør og se PASS** – begge tests + `python3 SK/scripts/test-resolve-codex.py`.
-- [ ] **Step 6: Commit** – `git commit -am "feat: preflight with agy discovery/auth and schema-enforced Gemini voice"` (plus nye filer).
+- [x] **Step 1: Failing tests i `test-preflight.sh`** (samme `assert`-stil som `test-classify-review.sh`). Testene bruger en fake `HOME` og `PATH=/usr/bin:/bin`. Når agy kun findes i `$HOME/.local/bin/agy`, skal `agy-path` printe den sti. Uden agy skal exit være 127. Uden `ANTIGRAVITY_API_KEY` og uden `~/.gemini/antigravity-cli` skal `check` vise `agy-auth MISSING` og exit 1.
+- [x] **Step 2: Udvid fake agy i `test-gemini-review.sh`**, så den kræver `--json-schema`, `--disable-slash-commands`, `--add-dir $REVIEW_DIR` og de valgte read-only-flag (`grep -Fq` som de eksisterende checks), og sæt `AGY_BIN` til fake-stien.
+- [x] **Step 3: Kør og se FAIL** – `bash SK/scripts/test-preflight.sh; bash SK/scripts/test-gemini-review.sh`.
+- [x] **Step 4: Implementér** `preflight.sh` og ændringerne i `gemini-review.sh`. `NEUTRAL_INSTRUCTION` og `SYS_DEFENSIVE` får sætningen `Return only JSON matching the provided schema.`, og `Output findings only.` slettes. Hvis Task 2 valgte en variant uden `--dangerously-skip-permissions`, opdateres header-kommentaren "HARDENING DELTA".
+- [x] **Step 5: Kør og se PASS** – begge tests + `python3 SK/scripts/test-resolve-codex.py`.
+- [x] **Step 6: Commit** – `git commit -am "feat: preflight with agy discovery/auth and schema-enforced Gemini voice"` (plus nye filer).
 
 ---
 
@@ -305,7 +305,7 @@ def test_target_block_is_fenced(self)           # prompt.md contains "```text" a
   - Run-mappen indeholder ved slut `snapshot.{before,after}.json`, `target.json`, `prompt.md`, `review_<voice>_<RID>.*` (de navne `wait-for-reviewers.sh` forventer), `review_<voice>_<RID>.extracted.json`, `verdicts.txt` (`<voice> <KLASSE>` pr. linje) og `aggregate.md`.
   - Exitkoder: 0 = alle valgte voices VALID/CLEAN; 1 = mindst én voice mangler, men aggregate.md er skrevet; 2 = preflight- eller wiring-fejl; 3 = intet at reviewe (videregivet fra prepare); 4 = snapshot ændret, hvor aggregate ikke skrives.
 
-- [ ] **Step 1: Failing test `test-run-review.sh`**
+- [x] **Step 1: Failing test `test-run-review.sh`**
 
 Testen bruger fake `claude`, `codex` og `agy` i en temp-bin. Fake `claude` printer `fixtures/claude-envelope.json`. Fake `codex` svarer på `--version` med `codex-cli <floor>`, kopierer `fixtures/codex-last.json` til argumentet efter `--output-last-message` og afviser med exit 97, hvis `--output-schema` mangler. Fake `agy` svarer på `models` med Gemini-ID'et fra `models.sh gemini` og ellers med `fixtures/agy-envelope.json`. `PEERREVIEW_CODEX_BIN` sættes til fake codex, og `HOME` får en fake `.gemini/antigravity-cli`. Projektet er et temp-git-repo i en mappe **med mellemrum** (`"$T/my project"`, Review Focus 1) med en dirty ændring. Cases:
   1. Normal kørsel: exit 0, `verdicts.txt` har tre `VALID`, og `aggregate.md` indeholder `| 1 |`.
@@ -315,9 +315,9 @@ Testen bruger fake `claude`, `codex` og `agy` i en temp-bin. Fake `claude` print
   5. `--voices codex`: kun codex er startet (claude/agy-fakes logger kald til en fil, som skal være tom), exit 0.
   6. Rent træ på `main`: exit 3.
 
-- [ ] **Step 2: Kør og se FAIL.** – `bash SK/scripts/test-run-review.sh`
+- [x] **Step 2: Kør og se FAIL.** – `bash SK/scripts/test-run-review.sh`
 
-- [ ] **Step 3: Implementér `run-review.sh`**
+- [x] **Step 3: Implementér `run-review.sh`**
 
 Flyt kommandoerne fra den nuværende `SK/SKILL.md` §1-§8 uændret i substansen: `umask 077`, `mktemp -d`, ejermarkør, snapshot før og efter, launch-flagene for Claude og Codex og watcher-kaldet. Ændringer:
 - Prompten læses med `"$(cat "$REVIEW_DIR/prompt.md")"`.
@@ -329,8 +329,8 @@ Flyt kommandoerne fra den nuværende `SK/SKILL.md` §1-§8 uændret i substansen
 - Fejl i preflight giver exit 2, før nogen voice startes.
 - Snapshot-diff ≠ tom giver besked + exit 4.
 
-- [ ] **Step 4: Kør og se PASS**, og kør derefter hele suiten (`for t in SK/scripts/test-*.sh; …` + `python3` på de tre `test-*.py`).
-- [ ] **Step 5: Commit** – `git add -A && git commit -m "feat: run-review.sh single entry point; drop model guard hook"`
+- [x] **Step 4: Kør og se PASS**, og kør derefter hele suiten (`for t in SK/scripts/test-*.sh; …` + `python3` på de tre `test-*.py`).
+- [x] **Step 5: Commit** – `git add -A && git commit -m "feat: run-review.sh single entry point; drop model guard hook"`
 
 ---
 
@@ -342,7 +342,7 @@ Flyt kommandoerne fra den nuværende `SK/SKILL.md` §1-§8 uændret i substansen
 **Interfaces:**
 - Consumes: CLI'en og exitkoderne for `run-review.sh` fra Task 7 og `review_json.py aggregate` fra Task 4.
 
-- [ ] **Step 1: Skriv SKILL.md** (dansk, så kort som muligt). Frontmatter-`description` skal nævne triple/tre-LLM review, diff- eller branch-review, adversarial review og pre-merge audit. Sektioner:
+- [x] **Step 1: Skriv SKILL.md** (dansk, så kort som muligt). Frontmatter-`description` skal nævne triple/tre-LLM review, diff- eller branch-review, adversarial review og pre-merge audit. Sektioner:
   1. *Ufravigelige regler*: de gamle regler 1-6. Regel 3 ændres til "kun schema-gyldige VALID/CLEAN tæller". Ny regel: efter rapporten STOP og spørg.
   2. *Vælg scope og mode*: map brugerens ønske til flags (`--scope`, `--base`, `--adversarial`, `--focus`). Default er `auto`. Fokustekst sendes som ét quoted argument.
   3. *Kør*: i Claude Code bruges `Bash` med `run_in_background: true` og `timeout: 2400000`, hvorefter brugeren får besked om, at reviewet kører. I Codex køres i forgrunden med lang yield. Exitkode-tabellen kommer fra Task 7.
@@ -350,10 +350,10 @@ Flyt kommandoerne fra den nuværende `SK/SKILL.md` §1-§8 uændret i substansen
   5. *Verificér*: hver klynge i `aggregate.md` læses i kildekoden. Klynger med én stemme skal bekræftes eller afvises med evidens. Semantisk ens klynger flettes.
   6. *Rapportér*: skriv `CODE_REVIEW_<YYYY-MM-DD>_<agent>_<model>.md` i projektroden (findings efter severity, `file:line` ordret, inferens bevaret, manglende voices øverst). Gentag i svaret, og spørg derefter (AskUserQuestion i Claude Code), hvilke findings der skal rettes.
   7. *Ryd op*: den gamle §10 med den nye ejermarkør.
-- [ ] **Step 2: Opdatér references.** `hardening.md`: launch-flagene flyttes til "se `run-review.sh`". Behold rationalet, og tilføj schema-, `--add-dir`- og agy-flag-afsnittene fra Task 2. `troubleshooting.md`: verdict-tabellen, hvor `WEAK` nu betyder "ikke schema-gyldigt JSON" og `CLEAN` betyder "`approve` + 0 findings + ikke-tom `checked`". Fjern punkterne om `NO_FINDINGS`, multiline-`CHECKED:` og `.json`-suffix-markdown. `TRIPLEREVIEW_CODEX_BIN` bliver til `PEERREVIEW_CODEX_BIN`.
-- [ ] **Step 3: `openai.yaml`**: `display_name: "LLM Peer Review"`, `default_prompt` bruger `$llm-peer-review`.
-- [ ] **Step 4: Verificér** – `grep -rn -E 'extract-review-output|guard-review-model|NO_FINDINGS|CHECKED:' SK` → ingen output. `grep -rn -E 'claude-opus|gemini-[0-9]|gpt-[0-9]' SK --include='*.md'` → ingen hardcodede modeller.
-- [ ] **Step 5: Commit** – `git commit -am "docs: rewrite skill for run-review.sh, JSON verdicts and scopes"`
+- [x] **Step 2: Opdatér references.** `hardening.md`: launch-flagene flyttes til "se `run-review.sh`". Behold rationalet, og tilføj schema-, `--add-dir`- og agy-flag-afsnittene fra Task 2. `troubleshooting.md`: verdict-tabellen, hvor `WEAK` nu betyder "ikke schema-gyldigt JSON" og `CLEAN` betyder "`approve` + 0 findings + ikke-tom `checked`". Fjern punkterne om `NO_FINDINGS`, multiline-`CHECKED:` og `.json`-suffix-markdown. `TRIPLEREVIEW_CODEX_BIN` bliver til `PEERREVIEW_CODEX_BIN`.
+- [x] **Step 3: `openai.yaml`**: `display_name: "LLM Peer Review"`, `default_prompt` bruger `$llm-peer-review`.
+- [x] **Step 4: Verificér** – `grep -rn -E 'extract-review-output|guard-review-model|NO_FINDINGS|CHECKED:' SK` → ingen output. `grep -rn -E 'claude-opus|gemini-[0-9]|gpt-[0-9]' SK --include='*.md'` → ingen hardcodede modeller.
+- [x] **Step 5: Commit** – `git commit -am "docs: rewrite skill for run-review.sh, JSON verdicts and scopes"`
 
 ---
 
@@ -367,15 +367,15 @@ Flyt kommandoerne fra den nuværende `SK/SKILL.md` §1-§8 uændret i substansen
 **Interfaces:**
 - Consumes: `run-review.sh` fra Task 7, `preflight.sh check` fra Task 6 og SKILL.md fra Task 8.
 
-- [ ] **Step 1: Manifester.** Følg formatet i codex-plugin-cc: marketplace-`name: "kastruppro-peer-review"`, ét plugin `llm-peer-review` med `source: "./plugins/llm-peer-review"`, `version: "1.0.0"` og `author.name: "Tobias Jul Kastrup"`. `plugin.json` har samme name, version, description og author.
-- [ ] **Step 2: Commands** (frontmatter: `description`, `argument-hint`, `disable-model-invocation: true`, `allowed-tools: Bash, Read, Glob, Grep, AskUserQuestion`):
+- [x] **Step 1: Manifester.** Følg formatet i codex-plugin-cc: marketplace-`name: "kastruppro-peer-review"`, ét plugin `llm-peer-review` med `source: "./plugins/llm-peer-review"`, `version: "1.0.0"` og `author.name: "Tobias Jul Kastrup"`. `plugin.json` har samme name, version, description og author.
+- [x] **Step 2: Commands** (frontmatter: `description`, `argument-hint`, `disable-model-invocation: true`, `allowed-tools: Bash, Read, Glob, Grep, AskUserQuestion`):
   - `review.md`, argument-hint `[--scope auto|working-tree|branch|full] [--base <ref>] [focus ...]`. Body: "Følg skill'en i `${CLAUDE_PLUGIN_ROOT}/skills/llm-peer-review/SKILL.md` med disse argumenter: `$ARGUMENTS`. Fokustekst efter flagene sendes som ét `--focus`-argument og må aldrig splices ind i kommandoen." Tilføj review-only-reglen fra codex-plugin-cc `commands/review.md`.
   - `adversarial-review.md`: som `review.md` plus `--adversarial` og codex-pluginets framing-sætning ("udfordrer valgt implementering, design og antagelser").
   - `setup.md`: kør `bash "${CLAUDE_PLUGIN_ROOT}/skills/llm-peer-review/scripts/preflight.sh" check` og videregiv outputtet. Ved `MISSING` foreslås installation (agy: officiel installer, codex: `npm install -g @openai/codex`, auth: kør CLI'en interaktivt én gang). Installér kun efter AskUserQuestion-bekræftelse.
-- [ ] **Step 3: README + NOTICE.** README: hvad det er, installation (`/plugin marketplace add <repo>`, `/plugin install llm-peer-review@kastruppro-peer-review`, `/reload-plugins`, `/llm-peer-review:setup`), brug af de tre commands, Codex-brug (peg på `SK`), samt "Inspireret af" med links til de to repos. NOTICE: "Portions of prompts/adversarial-review.md, prompts/review.md (grounding/calibration rules) and schemas/review-output.schema.json are derived from openai/codex-plugin-cc, Copyright 2026 OpenAI, licensed under the Apache License 2.0."
-- [ ] **Step 4: Validér** – `claude plugin validate plugins/llm-peer-review && claude plugin validate .`
+- [x] **Step 3: README + NOTICE.** README: hvad det er, installation (`/plugin marketplace add <repo>`, `/plugin install llm-peer-review@kastruppro-peer-review`, `/reload-plugins`, `/llm-peer-review:setup`), brug af de tre commands, Codex-brug (peg på `SK`), samt "Inspireret af" med links til de to repos. NOTICE: "Portions of prompts/adversarial-review.md, prompts/review.md (grounding/calibration rules) and schemas/review-output.schema.json are derived from openai/codex-plugin-cc, Copyright 2026 OpenAI, licensed under the Apache License 2.0."
+- [x] **Step 4: Validér** – `claude plugin validate plugins/llm-peer-review && claude plugin validate .`
 Expected: validering bestået. Findes subcommand'en ikke, kør i stedet `jq -e . .claude-plugin/marketplace.json plugins/llm-peer-review/.claude-plugin/plugin.json` og notér det i commit-beskeden.
-- [ ] **Step 5: Commit** – `git add -A && git commit -m "feat: Claude Code plugin with review, adversarial-review and setup commands"`
+- [x] **Step 5: Commit** – `git add -A && git commit -m "feat: Claude Code plugin with review, adversarial-review and setup commands"`
 
 ---
 
@@ -383,17 +383,28 @@ Expected: validering bestået. Findes subcommand'en ikke, kør i stedet `jq -e .
 
 **Files:** ingen kodeændringer, medmindre et fund kræver det (så fix + test i den task, der ejer koden).
 
-- [ ] **Step 1: Diff-review på spike-projektet** fra Task 2: `bash SK/scripts/run-review.sh --root "$P"`.
+- [x] **Step 1: Diff-review på spike-projektet** fra Task 2: `bash SK/scripts/run-review.sh --root "$P"`.
 Expected: exit 0, tre `VALID`, og `aggregate.md` har en klynge på `calc.py:2` med 2-3 voices.
-- [ ] **Step 2: Adversarial full-review af dette repo**: `bash SK/scripts/run-review.sh --root . --scope full --adversarial`.
+- [x] **Step 2: Adversarial full-review af dette repo**: `bash SK/scripts/run-review.sh --root . --scope full --adversarial`.
 Expected: exit 0 eller 1. Ved 1 noteres den manglende voice og årsagen fra `.err`.
-- [ ] **Step 3: Plugin-røgtest i Claude Code**: installér via README-kommandoerne, og kør `/llm-peer-review:setup` og `/llm-peer-review:review` på spike-projektet.
+- [x] **Step 3 (erstattet af `claude plugin validate plugins/llm-peer-review` og `claude plugin validate .`; den interaktive `/plugin install` er overladt til brugeren): Plugin-røgtest i Claude Code**: installér via README-kommandoerne, og kør `/llm-peer-review:setup` og `/llm-peer-review:review` på spike-projektet.
 Expected: reviewet kører i baggrunden, der kommer en notifikation, og `CODE_REVIEW_2026-10-24_claude_<model>.md` skrives i spike-projektets rod. Derefter kommer et AskUserQuestion om, hvilke fund der skal rettes.
-- [ ] **Step 4: Bekræft at originalen er urørt** – `ls -la <original triplereview skill>` → mtimes uændrede (SKILL.md: Oct 9 12:19).
-- [ ] **Step 5: Commit** eventuelle rettelser.
+- [x] **Step 4: Bekræft at originalen er urørt** – `ls -la <original triplereview skill>` → mtimes uændrede (SKILL.md: Oct 9 12:19).
+- [x] **Step 5: Commit** eventuelle rettelser.
 
 ---
 
 ## Bevidst udeladt (fra kilde-repoerne)
 
 Codex-pluginets broker/app-server, `/status`, `/result`, `/cancel`, `/rescue`, `/transfer` og stop-review-gate-hooket. Claude Code-baggrundsopgaver og -notifikationer dækker status. Antigravity-pluginets `settings.json`-patching for model er unødvendig, fordi `agy` 1.4.5 har `--model`. `/ask`, `/delegate`, `/image` og `/research` er ikke reviews. Desuden: inline-diff vs. self-collect (vi skriver altid `target.diff` og giver adgang via `--add-dir`), Gemini `--effort` (model-ID'et pinner allerede tier) og spørgsmålet "wait vs background" (altid background i Claude Code).
+
+## Opfølgning
+
+Status 2026-10-24: alle 10 tasks er leveret. Den afsluttende review (`CODE_REVIEW_2026-10-24_claude_opus_5.5.md`) gav 1 Critical og 7 Important fund. De er rettet sammen med Minor-fundene #10-#18 i `fix(security)`, `fix(prepare)`, `fix(aggregate)` og den efterfølgende docs/test-commit. Hele suiten er grøn, og ingen testprocesser lækker. Stadig åbent:
+
+- [ ] #9: relative `PATH`-indgange kan levere `claude`/`git`/`jq` fra projektet. Det er kun dokumenteret i hardening.md, ikke rettet.
+- [ ] Claude-stemmen: `--safe-mode`/`--restricted` er ikke evalueret med et live-kald. Brugerens plugins og hooks indlæses stadig.
+- [ ] NOTICE krediterer Apache-2.0-tekst fra codex-plugin-cc, men en kopi af licensen mangler (Apache §4(a)).
+- [ ] Plugin-directory-profilen vil have en LICENSE og et ikon. Brugeren har besluttet: ingen LICENSE indtil videre.
+- [ ] agy variant d (`--mode plan --sandbox`) er målt én gang (n=1). Genmål den efter hver agy-opgradering.
+- [ ] Den interaktive installation (`/plugin marketplace add …`, `/plugin install …`) er ikke testet live.

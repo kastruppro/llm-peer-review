@@ -65,7 +65,9 @@ anden, unik afgrænser (fx med tilfældige tegn tilføjet), som ikke findes i te
 Fjern eller ændr aldrig fokusteksten.
 
 `--scope` skal være `auto|working-tree|branch|full`, og `--base` et almindeligt
-ref-navn uden mellemrum eller shell-metategn (ellers spørg brugeren).
+ref-navn uden mellemrum eller shell-metategn (ellers spørg brugeren). `--base`
+kan kun kombineres med `auto` eller `branch`; med `working-tree` eller `full`
+giver det exit `2`.
 
 Mangler repoet `origin/HEAD` og `main`/`master`/`trunk`, fejler `auto` på et
 rent træ med besked om `--base` eller `--scope full`. Vælg da en af dem.
@@ -93,7 +95,7 @@ Første stdout-linje er `REVIEW_DIR=<sti>`; senere kommer `TARGET=…`, verdicts
 | `1` | mindst én stemme mangler/er ugyldig; `aggregate.md` findes | §4, derefter §5 |
 | `2` | preflight, wiring, watcher-fejl eller timeout; ingen aggregering | læs stderr, ret årsagen ([troubleshooting](references/troubleshooting.md)) |
 | `3` | intet at reviewe | foreslå `--scope full` eller `--base <ref>` |
-| `4` | projektet ændrede sig under kørslen; ingen aggregering | find årsagen, kør alle stemmer igen på et stabilt snapshot |
+| `4` | projektet eller `shared/` (diff/prompt) ændrede sig under kørslen; ingen aggregering | find årsagen, kør alle stemmer igen på et stabilt snapshot |
 | `130`/`143` | afbrudt; stemmerne er stoppet | spørg brugeren, om der skal køres igen |
 
 Watcher-grænser kan justeres med `REVIEW_POLL_INTERVAL`, `REVIEW_MAX_ITER` og

@@ -13,7 +13,7 @@ Gyldighed afgøres af JSON-skemaet (`review_json.py`), ikke af tekstmønstre. Se
 | `ERROR` | CLI- eller envelope-fejl (fx `is_error`, agy ikke `SUCCESS`) | Læs `.err`, ret årsagen og relaunch én gang |
 | `MISFIRE` | Reviewer roleplayede orchestrator | Relaunch én gang (ny run-mappe) |
 | `CAPACITY` | Auth, quota, netværk eller modelkapacitet | Kontrollér CLI/auth og relaunch én gang |
-| `REFUSED` | Gemini over-refusal | Wrapperen genformulerer neutralt én gang; relaunch derefter højst én gang |
+| `REFUSED` | Gemini over-refusal | Wrapperen genformulerer neutralt én gang. Overlever afvisningen det, hjælper et relaunch med samme model sjældent: aggregér som 2-stemmers review og notér den manglende Google-stemme, eller ret `gemini.model` i `models.json` (se dens `note`) og relaunch kun Gemini med `--voices gemini` (SKILL.md §4) |
 | `EMPTY` / `MISSING` | Intet brugbart output (under 40 bytes / filen findes ikke) | Kontrollér PID, sti og stderr |
 
 Kun `VALID` og `CLEAN` tæller. En stemme, der stadig ikke er gyldig efter ét
@@ -23,12 +23,13 @@ tavshed må aldrig bruges som enighed. Relaunch-opskriften står i SKILL.md §4.
 ## Exitkoder fra run-review.sh
 
 - **`2`:** preflight (manglende CLI, `jq`, `agy`-auth, ingen kompatibel Codex),
-  forkert argument, run-mappe inde i projektet, watcher-fejl eller timeout.
+  forkert argument (også `--base` sammen med `--scope working-tree|full`), run-mappe inde i projektet, watcher-fejl eller timeout.
   Stemmernes processer er stoppet, og der er ingen `aggregate.md`. Læs stderr.
 - **`3`:** `prepare_review.py` fandt intet at reviewe. Brug `--scope full` eller
   `--base <ref>`.
-- **`4`:** snapshot-diffen er ikke tom. Find årsagen (editor, formatter,
-  watcher-proces, en reviewer der skrev) og kør alle stemmer igen.
+- **`4`:** snapshot-diffen (projektet inkl. `.git`-kontrolfiler) eller
+  `shared/`-checksummen er ikke tom. Find årsagen (editor, formatter,
+  watcher-proces, `git fetch`, en reviewer der skrev) og kør alle stemmer igen.
 - **`130`/`143`:** afbrudt; run-mappen er bevaret.
 
 ## Hyppige fejl

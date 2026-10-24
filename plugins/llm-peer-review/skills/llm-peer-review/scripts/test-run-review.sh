@@ -13,7 +13,17 @@ CALLS="$T/calls.log"
 FAKE_MARKER=$((30000 + $$ % 20000)) # unique sleep duration: pgrep -f "sleep $FAKE_MARKER" finds leftovers
 export FAKE_MARKER
 mkdir -p "$FAKE_BIN" "$FAKE_HOME/.gemini/antigravity-cli" "$T/tmp"
-trap 'rm -rf -- "$T"' EXIT
+# Fakes can outlive a failed/aborted run (they ignore TERM on purpose), so the
+# trap kills anything carrying this run's marker or temp dir before removing it.
+LEFTOVER_RE="marker-$FAKE_MARKER|sleep $FAKE_MARKER|$T/"
+cleanup() {
+  pkill -KILL -f "$LEFTOVER_RE" 2>/dev/null || true
+  chmod -R u+w "$T" 2>/dev/null # run-review makes shared/ read-only
+  rm -rf -- "$T"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 FAILS=0
 ok() { printf 'ok - %s\n' "$1"; }
@@ -293,6 +303,10 @@ env PATH="$FAKE_BIN:$PATH" HOME="$FAKE_HOME" TMPDIR="$PROJ/tmp" PEERREVIEW_CODEX
 RC=$?
 [ "$RC" -eq 2 ] && ok "REVIEW_DIR inside project exits 2" || fail "REVIEW_DIR inside project exits 2 (rc=$RC)"
 check "REVIEW_DIR inside project starts no voice" test ! -s "$CALLS"
+
+# Final assertion: this test run must leave no fake process behind.
+sleep 1
+check "no fake process of this run remains" test -z "$(pgrep -f "$LEFTOVER_RE")"
 
 if [ "$FAILS" -ne 0 ]; then printf '%s check(s) failed\n' "$FAILS" >&2; exit 1; fi
 echo 'ok - run-review.sh end-to-end'

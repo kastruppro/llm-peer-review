@@ -8,9 +8,7 @@ TEST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/llm-peer-review-preflight.XXXXXX")"
 FAILURES=0
 
 cleanup() {
-  rm -f -- "$TEST_DIR/home/.local/bin/agy" "$TEST_DIR"/*.out "$TEST_DIR"/*.err
-  rmdir "$TEST_DIR/home/.local/bin" "$TEST_DIR/home/.local" "$TEST_DIR/home/.gemini/antigravity-cli" \
-    "$TEST_DIR/home/.gemini" "$TEST_DIR/home" "$TEST_DIR" 2>/dev/null || true
+  rm -rf -- "$TEST_DIR"
 }
 trap cleanup EXIT
 

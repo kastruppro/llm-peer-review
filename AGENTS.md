@@ -11,7 +11,7 @@ Skill og Claude Code-plugin, der kører tre uafhængige, parallelle code reviews
 ## Test
 
 ```bash
-cd plugins/llm-peer-review/skills/llm-peer-review/scripts && for t in test-*.sh; do bash "$t" || exit 1; done && python3 test-resolve-codex.py
+cd plugins/llm-peer-review/skills/llm-peer-review/scripts && for t in test-*.sh; do bash "$t" || exit 1; done && for p in test-*.py; do python3 "$p" || exit 1; done
 ```
 
 ## Regler
