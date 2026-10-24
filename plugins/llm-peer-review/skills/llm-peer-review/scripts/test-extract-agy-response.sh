@@ -18,11 +18,11 @@ trap cleanup EXIT
 
 RAW="$TEST_DIR/noisy-session.json"
 FINAL="$TEST_DIR/final.md"
-printf '%s\n' '{"conversation_id":"fixture","status":"SUCCESS","internal_dialog":["Let us inspect src/noise.ts:10","Wait! tools found src/more.py:20"],"response":"NO_FINDINGS\n\nCHECKED:\n- scripts/Detect.ps1\n- frontend/index.html\n"}' > "$RAW"
+printf '%s\n' '{"conversation_id":"fixture","status":"SUCCESS","internal_dialog":["Let us inspect src/noise.ts:10","Wait! tools found src/more.py:20"],"response":"{\"verdict\":\"approve\",\"summary\":\"No issues.\",\"findings\":[],\"checked\":[\"scripts/Detect.ps1\",\"frontend/index.html\"],\"next_steps\":[]}"}' > "$RAW"
 "$EXTRACT" "$RAW" > "$FINAL"
 
-grep -Fxq 'NO_FINDINGS' "$FINAL"
-grep -Fxq -- '- scripts/Detect.ps1' "$FINAL"
+grep -Fq '"verdict":"approve"' "$FINAL"
+grep -Fq 'scripts/Detect.ps1' "$FINAL"
 if grep -Fq 'src/noise.ts:10' "$FINAL"; then
   echo 'not ok - internal dialog leaked into extracted response' >&2
   exit 1

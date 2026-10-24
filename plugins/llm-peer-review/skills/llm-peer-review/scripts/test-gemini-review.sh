@@ -1,5 +1,5 @@
 #!/bin/bash
-# End-to-end wrapper fixture with a fake `agy`: WEAK first attempt, CLEAN retry.
+# End-to-end wrapper fixture with a fake `agy`: WEAK first attempt (empty `checked`), CLEAN retry.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -35,9 +35,9 @@ printf '%s\n' \
   'COUNT=$((COUNT + 1))' \
   'printf "%s\n" "$COUNT" > "$AGY_FAKE_COUNTER"' \
   'if [ "$COUNT" -eq 1 ]; then' \
-  '  printf "%s\n" '\''{"status":"SUCCESS","response":"NO_FINDINGS\n\nCHECKED:\nNo concrete list was supplied.\n"}'\''' \
+  '  printf "%s\n" '\''{"status":"SUCCESS","response":"{\"verdict\":\"approve\",\"summary\":\"s\",\"findings\":[],\"checked\":[],\"next_steps\":[]}"}'\''' \
   'else' \
-  '  printf "%s\n" '\''{"status":"SUCCESS","internal_dialog":["Let us inspect src/noise.ts:10","Wait! src/more.py:20"],"response":"NO_FINDINGS\n\nCHECKED:\n- scripts/Detect.ps1\n- frontend/index.html\n"}'\''' \
+  '  printf "%s\n" '\''{"status":"SUCCESS","internal_dialog":["Let us inspect src/noise.ts:10","Wait! src/more.py:20"],"response":"{\"verdict\":\"approve\",\"summary\":\"s\",\"findings\":[],\"checked\":[\"scripts/Detect.ps1\",\"frontend/index.html\"],\"next_steps\":[]}"}'\''' \
   'fi' > "$FAKE_AGY"
 chmod +x "$FAKE_AGY"
 
@@ -59,7 +59,7 @@ BASE="$REVIEW_ROOT/review_gemini_fixture"
 grep -Fxq 'verdict=WEAK' "$BASE.attempt1.classify.txt"
 grep -Fxq 'verdict=CLEAN' "$BASE.attempt2.classify.txt"
 grep -Fxq 'GEMINI:agy' "$BASE.VOICE"
-grep -Fxq -- '- scripts/Detect.ps1' "$BASE.json"
+grep -Fq 'scripts/Detect.ps1' "$BASE.json"
 if grep -Fq 'src/noise.ts:10' "$BASE.json"; then
   echo 'internal dialog leaked into published response' >&2
   exit 1
