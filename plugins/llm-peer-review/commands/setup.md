@@ -1,6 +1,7 @@
 ---
 description: Tjek om Claude-, Gemini- (agy) og Codex-CLI'erne er klar til peer review, og tilbyd installation hvis noget mangler
-allowed-tools: Bash, Read, Glob, Grep, AskUserQuestion
+disable-model-invocation: true
+allowed-tools: Bash, Read, Write, Glob, Grep, AskUserQuestion
 ---
 
 Kør:
@@ -8,6 +9,8 @@ Kør:
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/skills/llm-peer-review/scripts/preflight.sh" check
 ```
+
+`preflight.sh check` afslutter med exit 1, når noget er `MISSING`. Det er forventet og ikke en kommandofejl.
 
 Videregiv outputtet til brugeren uændret (én linje pr. komponent, `ok` eller `MISSING …`).
 

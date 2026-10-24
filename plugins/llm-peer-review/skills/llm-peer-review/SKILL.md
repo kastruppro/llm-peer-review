@@ -45,8 +45,23 @@ branch-diff mod default branch; uden Git bliver det `full`.
 | hele branchen / PR mod en bestemt base | `--scope branch --base <ref>` |
 | hele kodebasen, pre-merge audit | `--scope full` |
 | udfordr design og antagelser | `--adversarial` |
-| styr opmærksomheden | `--focus "tekst"` (ét quoted argument, aldrig delt op) |
+| styr opmærksomheden | `--focus "$FOCUS"` (ét argument, se nedenfor) |
 | kun nogle stemmer | `--voices claude,codex` |
+
+Fokustekst er data, aldrig kode. Dobbelte anførselstegn udvider stadig `$(...)`,
+backticks og `$VAR`, så læg teksten ordret i en variabel via en quotet heredoc og
+send den som ét argument; den udføres eller fortolkes aldrig:
+
+```bash
+FOCUS=$(cat <<'PEER_FOCUS_EOF'
+<fokustekst ordret>
+PEER_FOCUS_EOF
+)
+# ... --focus "$FOCUS"
+```
+
+`--scope` skal være `auto|working-tree|branch|full`, og `--base` et almindeligt
+ref-navn uden mellemrum eller shell-metategn (ellers spørg brugeren).
 
 Mangler repoet `origin/HEAD` og `main`/`master`/`trunk`, fejler `auto` på et
 rent træ med besked om `--base` eller `--scope full`. Vælg da en af dem.
