@@ -1,0 +1,26 @@
+{
+  "_README": "SINGLE SOURCE OF TRUTH for the three llm-peer-review reviewer models. Resolve every launch through models.sh. Claude, Gemini, and Codex must all receive the resolved model explicitly; never trust remembered or summarized model strings.",
+  "updated": "2026-10-02",
+  "claude": {
+    "family": "anthropic",
+    "cli": "claude",
+    "model": "claude-opus-5-5[1m]",
+    "effort": "high",
+    "note": "Claude Opus 5.5 with a 1 million token context window. Preserve the [1m] suffix and quote the resolved model when passing --model; pass --effort explicitly from this registry."
+  },
+  "gemini": {
+    "family": "google",
+    "cli": "agy",
+    "model": "gemini-3.8-flash-high",
+    "env": "GEMINI_REVIEW_MODEL",
+    "note": "Gemini 3.8 Flash (High), exact agy CLI model ID. Launch ONLY via gemini-review.sh and validate live against `agy models`. Deeper security pass: gemini-3.1-pro-high."
+  },
+  "codex": {
+    "family": "openai",
+    "cli": "codex",
+    "model": "gpt-6.1-sol",
+    "effort": "max",
+    "note": "Resolve the executable with resolve-codex.py before launching. min_cli_version is the locally verified conservative version floor, not a claimed vendor minimum. Pass model and effort explicitly from this registry on every exec call.",
+    "min_cli_version": "0.153.4"
+  }
+}
