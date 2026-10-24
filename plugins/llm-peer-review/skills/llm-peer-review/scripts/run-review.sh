@@ -141,7 +141,8 @@ CLAUDE_PID=0; CODEX_PID=0; GEMINI_PID=0; WATCH_PID=0
 is_alive() { # alive and not a zombie (kill -0 succeeds on unreaped zombies)
   local st
   st="$(ps -o stat= -p "$1" 2>/dev/null | tr -d ' ')"
-  [ -n "$st" ] && case "$st" in Z*) return 1 ;; esac
+  [ -n "$st" ] || return 1   # no such process
+  case "$st" in Z*) return 1 ;; esac
   return 0
 }
 
@@ -187,7 +188,7 @@ stop_voices() {
   done
   for q in $all; do is_alive "$q" && kill -KILL "$q" 2>/dev/null; done
   for p in $CLAUDE_PID $CODEX_PID $GEMINI_PID; do
-    [ "$p" != "0" ] && wait "$p" 2>/dev/null
+    [ "$p" != "0" ] && { wait "$p"; } 2>/dev/null
   done
   return 0
 }

@@ -102,6 +102,13 @@ run_rr() { # run_rr <args...>; stdout -> $T/out, stderr -> $T/err; sets RC and R
   RD="$(sed -n '1s/^REVIEW_DIR=//p' "$T/out")"
 }
 
+# 0. is_alive must report dead/nonexistent PIDs as not alive (PID-reuse guard).
+eval "$(sed -n '/^is_alive()/,/^}/p' "$RUN")"
+is_alive $$ && ok "is_alive: own PID is alive" || fail "is_alive: own PID is alive"
+sleep 0.1 & DEADPID=$!; wait "$DEADPID" 2>/dev/null
+is_alive "$DEADPID" && fail "is_alive: reaped PID is dead" || ok "is_alive: reaped PID is dead"
+is_alive 99998 && fail "is_alive: nonexistent PID is dead" || ok "is_alive: nonexistent PID is dead"
+
 # 1. Normal run, three voices, project path with a space.
 mkproj dirty
 run_rr --root "$PROJ"
