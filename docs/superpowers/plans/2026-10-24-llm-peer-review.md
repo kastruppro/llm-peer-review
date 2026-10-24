@@ -408,3 +408,5 @@ Status 2026-10-24: alle 10 tasks er leveret. Den afsluttende review (`CODE_REVIE
 - [ ] Plugin-directory-profilen vil have en LICENSE og et ikon. Brugeren har besluttet: ingen LICENSE indtil videre.
 - [ ] agy variant d (`--mode plan --sandbox`) er målt én gang (n=1). Genmål den efter hver agy-opgradering.
 - [ ] Den interaktive installation (`/plugin marketplace add …`, `/plugin install …`) er ikke testet live.
+- [ ] `snapshot.py` hasher `refs/**`, så `git fetch` under et review giver en falsk exit `4`. Overvej at begrænse til `refs/heads` og `refs/tags`.
+- [ ] Brede fund (>40 linjer) fra flere stemmer flettes aldrig automatisk, så antallet af stemmer kan blive for lavt.
