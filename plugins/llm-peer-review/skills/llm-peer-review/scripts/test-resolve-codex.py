@@ -113,7 +113,7 @@ class ResolverTests(unittest.TestCase):
 
     def test_explicit_old_override_does_not_fall_back(self):
         old = self.cli("explicit", "codex-cli 0.146.0")
-        result = subprocess.run([sys.executable, str(Path(resolver.__file__))],
+        result = subprocess.run([sys.executable, "-I", str(Path(resolver.__file__))],
             env={**os.environ, "PEERREVIEW_CODEX_BIN": str(old)}, capture_output=True, text=True)
         self.assertEqual(result.returncode, 1)
         self.assertEqual(result.stdout, "")
@@ -121,7 +121,7 @@ class ResolverTests(unittest.TestCase):
 
     def test_explicit_valid_override(self):
         cli = self.cli("explicit valid")
-        result = subprocess.run([sys.executable, str(Path(resolver.__file__))],
+        result = subprocess.run([sys.executable, "-I", str(Path(resolver.__file__))],
             env={**os.environ, "PEERREVIEW_CODEX_BIN": str(cli)}, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), str(cli))

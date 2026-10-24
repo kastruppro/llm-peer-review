@@ -5,9 +5,10 @@
 #   run-review.sh [--root DIR] [--scope auto|working-tree|branch|full] [--base REF]
 #                 [--adversarial] [--focus TEXT] [--voices claude,gemini,codex]
 #
-# Flow: preflight (selected voices only) -> private run dir -> prepare shared
-# inputs -> snapshot before -> launch voices in parallel -> watch -> snapshot
-# after -> extract, classify, aggregate. The first stdout line is REVIEW_DIR=<path>.
+# Flow: preflight (selected voices only) -> private run dir -> snapshot before ->
+# prepare shared inputs (then read-only + checksummed) -> launch voices in
+# parallel -> watch -> stop every voice tree -> snapshot after + shared/ check
+# -> extract, classify, aggregate. The first stdout line is REVIEW_DIR=<path>.
 # The run directory is never deleted by this script.
 #
 # Exit codes:
@@ -17,8 +18,9 @@
 #      voice process trees are stopped first
 #   130/143  interrupted (INT/TERM); voices stopped, run dir kept
 #   3  nothing to review (from prepare_review.py)
-#   4  the project changed while the reviewers ran (snapshot diff; no aggregate),
-#      also checked after a watcher failure/timeout
+#   4  the project or shared/ (target.diff, prompt.md) changed while the
+#      reviewers ran (diff on stderr; no aggregate), also checked after a
+#      watcher failure/timeout
 #
 # Watcher timing knobs (env): REVIEW_POLL_INTERVAL, REVIEW_MAX_ITER, REVIEW_STALE_ITERS.
 set -u
@@ -115,7 +117,32 @@ touch "$REVIEW_DIR/.llm-peer-review-owned" || die "cannot write to $REVIEW_DIR"
 printf 'REVIEW_DIR=%s\n' "$REVIEW_DIR"
 printf 'REVIEW_RUN_ID=%s\n' "$RID"
 
+# The baseline comes before anything else touches the project (prepare included).
+python3 -I "$SCRIPT_DIR/snapshot.py" "$PROJECT_ROOT" > "$REVIEW_DIR/snapshot.before.json" \
+  || die "snapshot before the review failed"
+
 # --- Shared inputs -----------------------------------------------------------
+# shared/ is readable by every voice (agy gets it as --add-dir and is not blocked
+# at the tool layer). After prepare it is made read-only and checksummed; the
+# owner can still chmod/replace it, so the checksum is the actual detection.
+shared_manifest() { # deterministic listing of shared/ with sha256 per regular file
+  ( cd "$REVIEW_DIR/shared" 2>/dev/null || { echo "shared/ missing"; exit 0; }
+    find . -print | LC_ALL=C sort | while IFS= read -r f; do
+      if [ -L "$f" ]; then printf 'link %s -> %s\n' "$f" "$(readlink "$f")"
+      elif [ -f "$f" ]; then printf '%s %s\n' "$(shasum -a 256 < "$f" | awk '{print $1}')" "$f"
+      else printf 'other %s\n' "$f"
+      fi
+    done )
+}
+shared_changed() { # print the diff on stderr; 0 = changed
+  shared_manifest > "$REVIEW_DIR/shared.sha256.after"
+  diff -u "$REVIEW_DIR/shared.sha256" "$REVIEW_DIR/shared.sha256.after" >&2 && return 1
+  echo "run-review: shared/ (the voices' common inputs) was modified during the review" >&2
+  return 0
+}
+# Give write access back on every exit, so the run dir can be cleaned up (SKILL.md §7).
+trap 'chmod -R u+w "$REVIEW_DIR/shared" 2>/dev/null' EXIT
+
 PREP=(python3 -I "$SCRIPT_DIR/prepare_review.py" --root "$PROJECT_ROOT" --out "$REVIEW_DIR/shared" --scope "$SCOPE")
 [ -n "$BASE" ] && PREP+=(--base "$BASE")
 [ "$ADVERSARIAL" -eq 1 ] && PREP+=(--adversarial)
@@ -131,9 +158,8 @@ printf 'TARGET=%s\n' "$LABEL"
 cp "$REVIEW_DIR/shared/prompt.md" "$REVIEW_DIR/prompt.md"
 cp "$REVIEW_DIR/shared/target.json" "$REVIEW_DIR/target.json"
 PROMPT="$(cat "$REVIEW_DIR/shared/prompt.md")"
-
-python3 -I "$SCRIPT_DIR/snapshot.py" "$PROJECT_ROOT" > "$REVIEW_DIR/snapshot.before.json" \
-  || die "snapshot before the review failed"
+chmod -R a-w "$REVIEW_DIR/shared" || die "cannot make shared/ read-only"
+shared_manifest > "$REVIEW_DIR/shared.sha256" || die "cannot checksum shared/"
 
 # --- Process control ---------------------------------------------------------
 CLAUDE_PID=0; CODEX_PID=0; GEMINI_PID=0; WATCH_PID=0
@@ -214,6 +240,7 @@ if [ "$WANT_CLAUDE" -eq 1 ]; then
       --model "$CLAUDE_MODEL" \
       --effort "$CLAUDE_EFFORT" \
       --setting-sources user \
+      --strict-mcp-config \
       --tools "Read,Glob,Grep" \
       --disallowedTools "Agent" "Task" \
       --permission-mode dontAsk \
@@ -261,6 +288,10 @@ wait "$WATCH_PID"
 WATCH_RC=$?
 WATCH_PID=0
 printf 'watcher exit=%s\n' "$WATCH_RC"
+# Always stop every voice tree before any check: a finished wrapper can leave
+# descendants (e.g. an attempt-1 agy child that ignored TERM) that would
+# otherwise keep writing after snapshot.after.
+stop_voices
 
 voice_file() { # voice_file <voice> -> the published output path the watcher expects
   case "$1" in
@@ -285,21 +316,27 @@ write_verdicts() {
   done
 }
 
-snapshot_changed() { # snapshot after; print the diff on stderr; 0 = unchanged
+snapshot_changed() { # snapshot after; print the diff on stderr; 0 = changed
   python3 -I "$SCRIPT_DIR/snapshot.py" "$PROJECT_ROOT" > "$REVIEW_DIR/snapshot.after.json" \
     || die "snapshot after the review failed"
   diff -u "$REVIEW_DIR/snapshot.before.json" "$REVIEW_DIR/snapshot.after.json" >&2 && return 1
   return 0
 }
 
+inputs_changed() { # project snapshot AND shared/ checksum (both always run); 0 = changed
+  local changed=1
+  snapshot_changed && changed=0
+  shared_changed && changed=0
+  return "$changed"
+}
+
 case "$WATCH_RC" in
   0|1) ;;
   *)
-    # Wiring error or timeout: stop every voice tree first, then check the project.
-    stop_voices
+    # Wiring error or timeout (voices already stopped above): check the inputs.
     write_verdicts
-    if snapshot_changed; then
-      echo "run-review: the project changed while the reviewers ran (see the diff above); watcher exit $WATCH_RC; no aggregate written." >&2
+    if inputs_changed; then
+      echo "run-review: the project or shared/ changed while the reviewers ran (see the diff above); watcher exit $WATCH_RC; no aggregate written." >&2
       exit 4
     fi
     echo "run-review: watcher failed (exit $WATCH_RC); no aggregate written" >&2
@@ -308,8 +345,8 @@ case "$WATCH_RC" in
 esac
 
 # --- Read-only invariant -----------------------------------------------------
-if snapshot_changed; then
-  echo "run-review: the project changed while the reviewers ran (see the diff above); no aggregate written. Re-run on a stable snapshot." >&2
+if inputs_changed; then
+  echo "run-review: the project or shared/ changed while the reviewers ran (see the diff above); no aggregate written. Re-run on a stable snapshot." >&2
   exit 4
 fi
 

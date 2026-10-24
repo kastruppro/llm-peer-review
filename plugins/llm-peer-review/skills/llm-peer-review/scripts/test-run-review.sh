@@ -36,6 +36,7 @@ for a in "$@"; do
 done
 case "$shared" in */shared) [ -d "$shared" ] || exit 96 ;; *) exit 96 ;; esac
 [ -n "$schema" ] || exit 95
+case " $* " in *" --strict-mcp-config "*) ;; *) exit 93 ;; esac
 [ -n "${*: -1}" ] || exit 94
 if [ "${FAKE_CLAUDE_MODE:-}" = hang ]; then exec sleep "$FAKE_MARKER"; fi
 if [ "${FAKE_CLAUDE_MODE:-}" = error ]; then
@@ -68,7 +69,26 @@ if [ "${1:-}" = "models" ]; then
   exit 0
 fi
 echo agy >> "$CALL_LOG"
+shared=""; prev=""
+for a in "$@"; do
+  [ "$prev" = "--add-dir" ] && case "$a" in */shared) shared="$a" ;; esac
+  prev="$a"
+done
+if [ -n "${FAKE_TAMPER_SHARED:-}" ] && [ -n "$shared" ]; then
+  # Record whether shared/ was writable, then tamper anyway (the owner can chmod back).
+  if [ -w "$shared/target.diff" ] || [ -w "$shared" ]; then echo writable > "$FAKE_STATE_DIR/SHARED_WRITABLE"; fi
+  chmod -R u+w "$shared" 2>/dev/null
+  echo "tampered by a voice" >> "$shared/target.diff"
+fi
 if [ "${FAKE_AGY_MODE:-}" = probe ]; then echo probe > "$FAKE_PROBE_DIR/PROBE.txt"; fi
+if [ "${FAKE_AGY_MODE:-}" = orphan ] && [ "$(grep -c '^agy$' "$CALL_LOG")" -eq 1 ]; then
+  # Attempt 1 leaves a grandchild that ignores TERM and writes late, then fails;
+  # attempt 2 (below) succeeds normally.
+  bash -c 'trap "" TERM; [ -n "$3" ] && echo early > "$2/EARLY.txt"; sleep "$1"; echo late > "$2/LATE.txt"' \
+    "marker-$FAKE_MARKER" "${FAKE_WRITER_DELAY:-8}" "$FAKE_PROBE_DIR" "${FAKE_EARLY_WRITE:-}" </dev/null >/dev/null 2>&1 &
+  printf '%s\n' '{"status":"SUCCESS","response":"not a review"}'
+  exit 0
+fi
 if [ "${FAKE_AGY_MODE:-}" = hang ]; then
   # A grandchild that writes into the project after a delay, plus a hanging agy.
   bash -c 'sleep "$1"; echo late > "$2/LATE.txt"' "marker-$FAKE_MARKER" "${FAKE_WRITER_DELAY:-6}" "$FAKE_PROBE_DIR" &
@@ -97,6 +117,7 @@ run_rr() { # run_rr <args...>; stdout -> $T/out, stderr -> $T/err; sets RC and R
     PEERREVIEW_CODEX_BIN="$FAKE_BIN/codex" PEERREVIEW_AGY_SYSTEM_PATHS="" \
     REVIEW_POLL_INTERVAL=1 REVIEW_MAX_ITER="${REVIEW_MAX_ITER:-60}" REVIEW_STALE_ITERS=20 \
     CALL_LOG="$CALLS" FAKE_FIXTURES="$FIX" FAKE_GEMINI_ID="$GEMINI_ID" FAKE_PROBE_DIR="$PROJ" \
+    FAKE_STATE_DIR="$T" \
     bash "$RUN" "$@" > "$T/out" 2> "$T/err" < /dev/null
   RC=$?
   RD="$(sed -n '1s/^REVIEW_DIR=//p' "$T/out")"
@@ -125,6 +146,8 @@ for f in snapshot.before.json snapshot.after.json target.json shared/prompt.md \
   check "run dir has $f" test -f "$RD/$f"
 done
 check "all three CLIs were launched" test "$(sort -u "$CALLS" | tr '\n' ' ')" = "agy claude codex "
+check "shared/ checksum was recorded" test -s "$RD/shared.sha256"
+check "shared/ is writable again after the run (cleanup works)" test -w "$RD/shared"
 
 # 2. Focus text with shell metacharacters reaches the prompt verbatim and is never executed.
 mkproj dirty
@@ -140,6 +163,39 @@ FAKE_AGY_MODE=probe run_rr --root "$PROJ"
 [ "$RC" -eq 4 ] && ok "snapshot change exits 4" || fail "snapshot change exits 4 (rc=$RC)"
 check "no aggregate.md after snapshot change" test ! -e "$RD/aggregate.md"
 check "snapshot diff is reported on stderr" grep -Fq 'PROBE.txt' "$T/err"
+
+# 3b. A voice that tampers with shared/ (other voices' inputs): exit 4, no aggregate.
+mkproj dirty
+rm -f "$T/SHARED_WRITABLE"
+FAKE_TAMPER_SHARED=1 run_rr --root "$PROJ" --voices gemini
+[ "$RC" -eq 4 ] && ok "shared/ tampering exits 4" || { fail "shared/ tampering exits 4 (rc=$RC)"; cat "$T/err" >&2; }
+check "no aggregate.md after shared/ tampering" test ! -e "$RD/aggregate.md"
+check "shared/ tampering is reported on stderr" grep -Fq 'shared' "$T/err"
+check "shared/ was read-only while the voices ran" test ! -e "$T/SHARED_WRITABLE"
+
+# 3c. shared/ tampering is also caught on the failure (timeout) path.
+mkproj dirty
+FAKE_TAMPER_SHARED=1 FAKE_AGY_MODE=hang FAKE_WRITER_DELAY=30 REVIEW_MAX_ITER=4 run_rr --root "$PROJ" --voices gemini
+[ "$RC" -eq 4 ] && ok "shared/ tampering plus timeout exits 4" || { fail "shared/ tampering plus timeout exits 4 (rc=$RC)"; cat "$T/err" >&2; }
+check "no fake process remains after shared/ tampering plus timeout" test -z "$(pgrep -f "marker-$FAKE_MARKER|sleep $FAKE_MARKER")"
+
+# 3d. An attempt-1 grandchild that ignores TERM must not outlive a normal finish.
+mkproj dirty
+rm -f "$PROJ/LATE.txt"
+START=$(date +%s)
+FAKE_AGY_MODE=orphan FAKE_WRITER_DELAY=25 run_rr --root "$PROJ" --voices gemini
+[ "$RC" -eq 0 ] && ok "orphaned grandchild run exits 0" || { fail "orphaned grandchild run exits 0 (rc=$RC)"; cat "$T/err" >&2; }
+check "gemini ran two attempts" test "$(grep -c '^agy$' "$CALLS")" -eq 2
+check "no orphaned grandchild remains after a normal finish" test -z "$(pgrep -f "marker-$FAKE_MARKER")"
+while [ $(( $(date +%s) - START )) -lt 27 ]; do sleep 1; done
+check "orphaned grandchild never wrote late" test ! -e "$PROJ/LATE.txt"
+
+# 3e. The same grandchild writing BEFORE the stop: the snapshot catches it (exit 4).
+mkproj dirty
+FAKE_AGY_MODE=orphan FAKE_EARLY_WRITE=1 FAKE_WRITER_DELAY=30 run_rr --root "$PROJ" --voices gemini
+[ "$RC" -eq 4 ] && ok "orphan early write exits 4" || { fail "orphan early write exits 4 (rc=$RC)"; cat "$T/err" >&2; }
+check "orphan early write is named in the diff" grep -Fq 'EARLY.txt' "$T/err"
+check "no orphaned grandchild remains after exit 4" test -z "$(pgrep -f "marker-$FAKE_MARKER")"
 
 # 4. Claude error envelope (the fake prints a long error body: classify-review.sh
 # reports bodies under 40 bytes as EMPTY, so a bare {"is_error":true} would never reach ERROR): exit 1, claude ERROR, MANGLER in the aggregate.

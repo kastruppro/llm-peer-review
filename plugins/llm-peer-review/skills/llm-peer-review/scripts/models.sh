@@ -12,7 +12,10 @@
 # Usage:
 #   models.sh <claude|gemini|codex> [model|effort|family|env|cli]   # default field: model
 #   models.sh json                                                  # dump the whole file
-#   models.sh check                                                 # print all three canonical strings
+#   models.sh check                                                 # print all three canonical strings; exit 65 if any is missing
+#
+# python3 runs with -I: the cwd is usually the (untrusted) reviewed project, and
+# without -I a planted json.py there would be imported and executed.
 set -euo pipefail
 
 SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -31,13 +34,20 @@ case "$1" in
     exec cat "$MODELS_JSON"
     ;;
   check)
+    # Fail if ANY voice lookup fails (the lookup's own error is already on stderr).
+    rc=0
     for v in claude gemini codex; do
-      printf '%-7s %s\n' "$v" "$("$0" "$v" model)"
+      if m="$(bash "${BASH_SOURCE[0]}" "$v" model)"; then
+        printf '%-7s %s\n' "$v" "$m"
+      else
+        rc=65
+      fi
     done
+    exit "$rc"
     ;;
   claude|gemini|codex)
     voice="$1"; field="${2:-model}"
-    val="$(python3 -c '
+    val="$(python3 -I -c '
 import json, sys
 d = json.load(open(sys.argv[1]))
 voice, field = sys.argv[2], sys.argv[3]

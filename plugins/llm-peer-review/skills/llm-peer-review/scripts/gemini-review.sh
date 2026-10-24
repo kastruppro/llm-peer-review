@@ -255,13 +255,36 @@ publish_attempt() {
   cp "$LAST_FINAL" "$FINAL"
 }
 
-# Recursive kill of a PID and all its descendants (macOS has no setsid(1);
-# killing only the subshell leaves the agy child running, writing to the output
-# file WHILE we classify it, and burning quota).
+# Kill a PID and all its descendants (macOS has no setsid(1); killing only the
+# subshell leaves the agy child running, writing to the output file WHILE we
+# classify it, and burning quota). The whole tree is collected FIRST (an orphan
+# is no longer reachable via pgrep -P once its parent died), sent TERM, and any
+# member still alive after a short grace (e.g. one that ignores TERM) gets KILL.
+collect_tree() { # print PID and all descendants (parents first)
+  local c
+  echo "$1"
+  for c in $(pgrep -P "$1" 2>/dev/null); do collect_tree "$c"; done
+}
+is_alive() { # alive and not a zombie
+  local st
+  st="$(ps -o stat= -p "$1" 2>/dev/null | tr -d ' ')"
+  [ -n "$st" ] || return 1
+  case "$st" in Z*) return 1 ;; esac
+  return 0
+}
 kill_tree() {
-  local p="$1" c
-  for c in $(pgrep -P "$p" 2>/dev/null); do kill_tree "$c"; done
-  kill "$p" 2>/dev/null
+  local all p i alive
+  all="$(collect_tree "$1")"
+  for p in $all; do kill -TERM "$p" 2>/dev/null; done
+  i=0
+  while [ "$i" -lt 6 ]; do
+    alive=0
+    for p in $all; do is_alive "$p" && alive=1; done
+    [ "$alive" -eq 0 ] && return 0
+    sleep 0.5; i=$((i + 1))
+  done
+  for p in $all; do is_alive "$p" && kill -KILL "$p" 2>/dev/null; done
+  return 0
 }
 
 # Workspace dirs: shared inputs first, project LAST (agy writes relative paths into
@@ -303,8 +326,6 @@ ${prompt}" \
     if [ "$waited" -ge "$ATTEMPT_CAP" ]; then
       echo "[gemini-review] attempt timed out after ${ATTEMPT_CAP}s - killing process tree" >> "$err"
       kill_tree "$pid"
-      sleep 2
-      kill -0 "$pid" 2>/dev/null && { kill_tree "$pid"; kill -9 "$pid" 2>/dev/null; }
       break
     fi
   done

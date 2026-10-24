@@ -82,6 +82,14 @@ for comp in claude agy agy-auth codex jq python3 git models; do
 done
 [ "$MISSING_LINES" -eq 0 ] && ok 'check lists every component'
 
+# 7. A planted json.py in the cwd (the reviewed project) is never imported.
+mkdir -p "$TEST_DIR/proj"
+printf 'import os\nopen(os.path.join(os.path.dirname(os.path.abspath(__file__)), "PWNED"), "w").close()\nfrom json import *\n' \
+  > "$TEST_DIR/proj/json.py"
+( cd "$TEST_DIR/proj" && run planted bash "$PREFLIGHT" check )
+if [ ! -e "$TEST_DIR/proj/PWNED" ]; then ok 'check does not import json.py from the cwd'; else fail 'check imported json.py from the cwd'; fi
+rm -f "$TEST_DIR/proj/json.py" "$TEST_DIR/proj/PWNED"; rmdir "$TEST_DIR/proj"
+
 run bad bash "$PREFLIGHT" bogus
 [ "$RC" -eq 64 ] && ok 'unknown subcommand exits 64' || fail "unknown subcommand rc=$RC"
 

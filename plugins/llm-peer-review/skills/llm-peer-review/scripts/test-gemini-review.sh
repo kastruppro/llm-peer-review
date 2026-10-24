@@ -20,12 +20,15 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# The model ID comes from the registry, never a literal (models.json is the only source).
+FAKE_GEMINI_ID="$(bash "$SCRIPT_DIR/models.sh" gemini)"
+export FAKE_GEMINI_ID
 FAKE_AGY="$FAKE_BIN/agy"
 printf '%s\n' \
   '#!/bin/bash' \
   'set -euo pipefail' \
   'if [ "${1:-}" = "models" ]; then' \
-  '  printf "%s\n" '\''gemini-3.8-flash-high\tGemini 3.8 Flash (High)'\''' \
+  '  printf "%s\n" "${FAKE_GEMINI_ID}\\tGemini (fake)"' \
   '  exit 0' \
   'fi' \
   'printf "%s\n" "$*" | grep -Fq -- "--output-format json"' \
@@ -96,5 +99,30 @@ GEMINI_REVIEW_MODEL='gemini-9-unknown-high' \
 UNKNOWN_RC=$?
 set -e
 [ "$UNKNOWN_RC" -eq 64 ]
+
+# Attempt timeout: a descendant that ignores TERM must be KILLed, not left running.
+export HANG_MARK="gemini-hang-$$"
+HANG_AGY="$FAKE_BIN/agy-hang"
+rm -f "$COUNTER"
+cat > "$HANG_AGY" <<'FAKE'
+#!/bin/bash
+if [ "${1:-}" = "models" ]; then printf '%s\n' "$FAKE_GEMINI_ID"; exit 0; fi
+COUNT=0; [ -f "$AGY_FAKE_COUNTER" ] && COUNT="$(sed -n 1p "$AGY_FAKE_COUNTER")"
+COUNT=$((COUNT + 1)); printf '%s\n' "$COUNT" > "$AGY_FAKE_COUNTER"
+if [ "$COUNT" -eq 1 ]; then
+  bash -c 'trap "" TERM; sleep 60' "$HANG_MARK" </dev/null >/dev/null 2>&1 &
+  exec sleep 60
+fi
+printf '%s\n' '{"status":"SUCCESS","response":"{\"verdict\":\"approve\",\"summary\":\"s\",\"findings\":[],\"checked\":[\"a.py\"],\"next_steps\":[]}"}'
+FAKE
+chmod +x "$HANG_AGY"
+AGY_BIN="$HANG_AGY" REVIEW_DIR="$REVIEW_ROOT" GEMINI_ATTEMPT_CAP=5 \
+  "$WRAPPER" hang 'Review with a hanging first attempt.' "$PROJECT_ROOT" >/dev/null 2>&1
+[ -f "$REVIEW_ROOT/review_gemini_hang.VOICE" ]
+if pgrep -f "$HANG_MARK" >/dev/null; then
+  pkill -KILL -f "$HANG_MARK"
+  echo 'not ok - a TERM-ignoring descendant survived the attempt timeout' >&2
+  exit 1
+fi
 
 printf '%s\n' 'ok - literal \\t model listing parses exactly, unknown IDs fail, and CLEAN retry evidence is preserved'
