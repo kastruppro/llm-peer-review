@@ -1,0 +1,24 @@
+{
+  "verdict": "needs-attention",
+  "summary": "The change breaks average calculations. The Markdown review could not be saved because the workspace is read-only.",
+  "findings": [
+    {
+      "severity": "high",
+      "title": "Restore the correct denominator",
+      "body": "Dividing by len(xs) - 1 produces incorrect averages: avg([2, 4]) returns 6.0 instead of 3.0. It also makes avg([7]) raise ZeroDivisionError instead of returning 7.0.",
+      "file": "calc.py",
+      "line_start": 2,
+      "line_end": 2,
+      "confidence": 1.0,
+      "recommendation": "Restore return sum(xs) / len(xs)."
+    }
+  ],
+  "checked": [
+    "Read target.diff and the complete calc.py.",
+    "Searched for callers and tests; none found.",
+    "Reproduced incorrect output and the single-element crash with Python."
+  ],
+  "next_steps": [
+    "Restore the denominator and add regression tests for single-element and multiple-element inputs."
+  ]
+}
