@@ -241,6 +241,17 @@ class ReviewJsonTests(unittest.TestCase):
         r = {"claude": rev(f("a.py", 10, line_end=60)), "codex": rev(f("a.py", 10, line_end=12))}
         self.assertTrue(all(len(c["voices"]) == 1 for c in rj.cluster(r, "/R")))
 
+    def test_matching_wide_findings_of_two_voices_merge(self):
+        # Same whole-function finding from two voices: both edges within LINE_MARGIN.
+        r = {"claude": rev(f("a.py", 1, line_end=500)), "codex": rev(f("a.py", 3, line_end=498))}
+        [c] = rj.cluster(r, "/R")
+        self.assertEqual(c["voices"], ["claude", "codex"])
+        self.assertEqual((c["line_start"], c["line_end"]), (1, 500))
+
+    def test_wide_findings_with_different_edges_stay_apart(self):
+        r = {"claude": rev(f("a.py", 1, line_end=500)), "codex": rev(f("a.py", 100, line_end=400))}
+        self.assertEqual(len(rj.cluster(r, "/R")), 2)
+
     def test_probe_same_voice_chain_does_not_fake_consensus(self):
         r = {"claude": rev(f("a.py", 10, title="A"), f("a.py", 16, title="B"), f("a.py", 22, title="C")),
              "codex": rev(f("a.py", 25, title="D"))}

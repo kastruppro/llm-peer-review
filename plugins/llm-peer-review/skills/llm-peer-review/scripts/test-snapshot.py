@@ -77,6 +77,17 @@ class SnapshotTests(unittest.TestCase):
             fh.write("%s refs/tags/planted\n" % sha)
         self.assertNotEqual(packed, snap.snapshot(self.root))
 
+    def test_fetch_style_ref_updates_do_not_change_manifest(self):
+        # A `git fetch` by the user or an IDE during the review is not a reviewer write.
+        before = snap.snapshot(self.root)
+        git(self.root, "update-ref", "refs/remotes/origin/main", "HEAD")
+        (self.root / ".git" / "FETCH_HEAD").write_text("deadbeef\t\tbranch 'main'\n")
+        self.assertEqual(before, snap.snapshot(self.root))
+        git(self.root, "pack-refs", "--all")  # remote ref now lives in packed-refs
+        packed = snap.snapshot(self.root)
+        git(self.root, "update-ref", "-d", "refs/remotes/origin/main")  # like fetch --prune
+        self.assertEqual(packed, snap.snapshot(self.root))
+
     def test_head_change_changes_manifest(self):
         git(self.root, "branch", "side")
         before = snap.snapshot(self.root)

@@ -137,7 +137,8 @@ inferens og usikkerhed står i `review_<voice>_<RID>.extracted.json` i run-mappe
 
 Scriptet grupperer kun efter sti og nærhed: en finding kommer i en klynge, når
 dens linjer ligger inden for ±3 linjer af klyngens første finding, aldrig to
-findings fra samme stemme, og en finding over 40 linjer slås aldrig sammen.
+findings fra samme stemme, og en finding over 40 linjer slås kun sammen med en
+lige så bred finding fra en anden stemme, hvis start og slut ligger inden for ±3.
 Nærhed er ikke det samme som enighed.
 
 - En klynge med mere end ét særskilt problem skal splittes; stemmer tæller kun,

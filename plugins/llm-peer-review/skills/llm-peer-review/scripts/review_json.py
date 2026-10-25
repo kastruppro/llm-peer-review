@@ -23,7 +23,7 @@ EXIT_CODES = {"VALID": 0, "CLEAN": 0, "WEAK": 5, "ERROR": 6, "NOTJSON": 8}
 FENCE = re.compile(r"\A```(?:json)?[ \t]*\r?\n(.*?)\r?\n?```\Z", re.DOTALL | re.IGNORECASE)
 SEVERITY_RANK = {"critical": 3, "high": 2, "medium": 1, "low": 0}
 LINE_MARGIN = 3
-WIDE_SPAN = 40  # a finding wider than this many lines is never merged
+WIDE_SPAN = 40  # wider findings only merge with a wide finding of the same extent
 
 
 class ReviewError(Exception):
@@ -172,7 +172,9 @@ def cluster(reviews, root):
     range overlaps the cluster's anchor (its first finding's range) with
     LINE_MARGIN lines of slack on each side, and only if that voice is not in the
     cluster yet (same-voice findings never merge). A finding spanning more than
-    WIDE_SPAN lines is never merged. Of several candidates the nearest anchor wins.
+    WIDE_SPAN lines never absorbs narrow ones; it only merges with another voice's
+    wide finding whose start AND end are within LINE_MARGIN of its own (the same
+    whole-function finding). Of several candidates the nearest anchor wins.
     Sorted by severity, voice count, file, line. Proximity is not identity: the
     orchestrator still splits clusters that hold more than one defect (SKILL.md §5).
     """
@@ -186,14 +188,18 @@ def cluster(reviews, root):
     for file, lo, hi, voice, fd in items:
         wide = hi - lo + 1 > WIDE_SPAN
         best, best_gap = None, None
-        if not wide:
-            for c in clusters:
-                if c["file"] != file or c["wide"] or voice in c["voices"]:
-                    continue
-                a_lo, a_hi = c["anchor"]
+        for c in clusters:
+            if c["file"] != file or c["wide"] != wide or voice in c["voices"]:
+                continue
+            a_lo, a_hi = c["anchor"]
+            if wide:  # wide only joins wide, and only with both edges within LINE_MARGIN
+                gap = max(abs(lo - a_lo), abs(hi - a_hi))
+                fits = gap <= LINE_MARGIN
+            else:
                 gap = max(0, lo - a_hi, a_lo - hi)
-                if gap <= 2 * LINE_MARGIN and (best_gap is None or gap < best_gap):
-                    best, best_gap = c, gap
+                fits = gap <= 2 * LINE_MARGIN
+            if fits and (best_gap is None or gap < best_gap):
+                best, best_gap = c, gap
         if best is None:
             clusters.append({"file": file, "line_start": lo, "line_end": hi, "anchor": (lo, hi),
                              "wide": wide, "severity": fd["severity"], "voices": {voice},

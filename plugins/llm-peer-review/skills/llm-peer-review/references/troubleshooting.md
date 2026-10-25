@@ -29,7 +29,8 @@ tavshed må aldrig bruges som enighed. Relaunch-opskriften står i SKILL.md §4.
   `--base <ref>`.
 - **`4`:** snapshot-diffen (projektet inkl. `.git`-kontrolfiler) eller
   `shared/`-checksummen er ikke tom. Find årsagen (editor, formatter,
-  watcher-proces, `git fetch`, en reviewer der skrev) og kør alle stemmer igen.
+  watcher-proces, `git commit`/`checkout`, en reviewer der skrev) og kør alle stemmer igen.
+  Et almindeligt `git fetch` giver ikke længere exit `4` (fjern-refs hashes ikke).
 - **`130`/`143`:** afbrudt; run-mappen er bevaret.
 
 ## Hyppige fejl
@@ -55,7 +56,7 @@ tavshed må aldrig bruges som enighed. Relaunch-opskriften står i SKILL.md §4.
   giver `WEAK`.
 - **Samme fund står som flere klynger:** `aggregate.md` slår kun sammen på
   normaliseret sti og linjer inden for ±3 af klyngens første finding (aldrig samme
-  stemme, aldrig findings over 40 linjer); flet semantisk ens klynger manuelt (§5).
+  stemme; findings over 40 linjer kun med en lige så bred med start og slut inden for ±3); flet semantisk ens klynger manuelt (§5).
 - **Én klynge rummer flere problemer:** split den (SKILL.md §5); stemmer tæller kun,
   når de beskriver samme defekt.
 - **Intern AGY-dialog giver falsk `VALID`:** kontrollér `attemptN.raw.json`, men

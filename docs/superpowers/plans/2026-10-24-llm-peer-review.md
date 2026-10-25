@@ -402,11 +402,11 @@ Codex-pluginets broker/app-server, `/status`, `/result`, `/cancel`, `/rescue`, `
 
 Status 2026-10-24: alle 10 tasks er leveret. Den afsluttende review (`CODE_REVIEW_2026-10-24_claude_opus_5.5.md`) gav 1 Critical og 7 Important fund. De er rettet sammen med Minor-fundene #10-#18 i `fix(security)`, `fix(prepare)`, `fix(aggregate)` og den efterfølgende docs/test-commit. Hele suiten er grøn, og ingen testprocesser lækker. Stadig åbent:
 
-- [ ] #9: relative `PATH`-indgange kan levere `claude`/`git`/`jq` fra projektet. Det er kun dokumenteret i hardening.md, ikke rettet.
+- [x] #9: relative `PATH`-indgange kan levere `claude`/`git`/`jq` fra projektet. Rettet 2026-10-25: `run-review.sh` beholder kun absolutte indgange (test i test-run-review.sh).
 - [ ] Claude-stemmen: `--safe-mode`/`--restricted` er ikke evalueret med et live-kald. Brugerens plugins og hooks indlæses stadig.
 - [ ] NOTICE krediterer Apache-2.0-tekst fra codex-plugin-cc, men en kopi af licensen mangler (Apache §4(a)).
 - [ ] Plugin-directory-profilen vil have en LICENSE og et ikon. Brugeren har besluttet: ingen LICENSE indtil videre.
 - [ ] agy variant d (`--mode plan --sandbox`) er målt én gang (n=1). Genmål den efter hver agy-opgradering.
-- [ ] Den interaktive installation (`/plugin marketplace add …`, `/plugin install …`) er ikke testet live.
-- [ ] `snapshot.py` hasher `refs/**`, så `git fetch` under et review giver en falsk exit `4`. Overvej at begrænse til `refs/heads` og `refs/tags`.
-- [ ] Brede fund (>40 linjer) fra flere stemmer flettes aldrig automatisk, så antallet af stemmer kan blive for lavt.
+- [ ] Den interaktive installation (`/plugin marketplace add kastruppro/llm-peer-review`, `/plugin install …`) er ikke testet live. Repoet er nu på GitHub (privat), så det kan testes.
+- [x] `snapshot.py` hasher `refs/**`, så `git fetch` under et review giver en falsk exit `4`. Rettet 2026-10-25: kun `refs/heads`/`refs/tags` og de lokale linjer i `packed-refs` (test i test-snapshot.py).
+- [x] Brede fund (>40 linjer) fra flere stemmer flettes aldrig automatisk, så antallet af stemmer kan blive for lavt. Rettet 2026-10-25: to brede fund fra forskellige stemmer flettes, når start og slut ligger inden for ±3 (test i test-review-json.py).

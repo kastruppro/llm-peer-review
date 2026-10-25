@@ -32,7 +32,7 @@ Read-only er en invariant, som scriptet tjekker: `snapshot.py` tager et
 indholdsmanifest før reviewet (før prepare) og efter. Manifestet dækker tracked
 og ikke-ignorerede untracked filer, filtilstand og Git-tilstand (HEAD, index,
 status) samt Git-kontrolfilerne `HEAD`, `config`, `config.worktree`,
-`packed-refs`, `hooks/**`, `info/**` og `refs/**` i både git-dir og common-dir
+`packed-refs` (kun lokale refs), `hooks/**`, `info/**`, `refs/heads/**` og `refs/tags/**` i både git-dir og common-dir
 (så linked worktrees, hvor `.git` er en fil, også er dækket). En forskel giver
 exit `4` og ingen aggregering. Inden snapshotet stoppes alle stemmers
 procestræer altid, også efter en normal afslutning, så en efterladt
@@ -55,9 +55,14 @@ Det er en efterkontrol, ikke skrivebeskyttelse. Manifestet dækker **ikke**:
   `.gitattributes`): en stemme, der planter en, opdages (config er hashet),
   men efter-snapshottets `git status` kan allerede have kørt den.
 
-`PATH` slås op efter `cd "$PROJECT_ROOT"`. Relative `PATH`-indgange (fx `.` eller
-`bin`) kan derfor give en `claude`, `git` eller `jq` fra projektet; hold `PATH`
-absolut. `resolve-codex.py` ignorerer allerede relative indgange.
+`refs/remotes`, `FETCH_HEAD` og fjern-refs i `packed-refs` hashes bevidst ikke:
+de ændres af ethvert `git fetch` (fra brugeren eller en IDE) og er ikke en
+reviewers skrivning.
+
+`run-review.sh` fjerner relative `PATH`-indgange (`""`, `.`, `bin` osv.) ved start,
+fordi CLI'erne slås op efter `cd "$PROJECT_ROOT"`; ellers kunne projektet levere
+sin egen `claude`, `git` eller `jq`. `resolve-codex.py` ignorerer også relative
+indgange.
 
 Modeller resolves altid fra `scripts/models.json` gennem `models.sh`.
 Hardcodede modelnavne bliver hurtigt stale og kan stille fjerne en familie fra

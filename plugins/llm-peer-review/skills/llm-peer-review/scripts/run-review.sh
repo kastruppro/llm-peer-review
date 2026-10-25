@@ -25,6 +25,12 @@
 # Watcher timing knobs (env): REVIEW_POLL_INTERVAL, REVIEW_MAX_ITER, REVIEW_STALE_ITERS.
 set -u
 
+# Keep only absolute PATH entries: CLIs are looked up after `cd "$PROJECT_ROOT"`,
+# so a relative entry ("", ".", "bin") would let the reviewed project supply claude/git/jq.
+_abs_path=""; _old_ifs="$IFS"; IFS=:; set -f
+for _d in $PATH; do case "$_d" in /*) _abs_path="${_abs_path:+$_abs_path:}$_d" ;; esac; done
+set +f; IFS="$_old_ifs"; PATH="$_abs_path"; export PATH; unset _abs_path _old_ifs _d
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCHEMA="$SCRIPT_DIR/../schemas/review-output.schema.json"
 

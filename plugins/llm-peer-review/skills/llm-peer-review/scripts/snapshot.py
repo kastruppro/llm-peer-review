@@ -14,7 +14,8 @@ import sys
 GIT_SAFE = ('-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null')
 # Git control files that change what git (or a later commit/checkout) executes.
 GIT_FILES = ('HEAD', 'config', 'config.worktree', 'packed-refs')
-GIT_TREES = ('hooks', 'info', 'refs')
+# Only local refs: refs/remotes and FETCH_HEAD change on any `git fetch` (user or IDE).
+GIT_TREES = ('hooks', 'info', 'refs/heads', 'refs/tags')
 
 
 def git(root, *args):
@@ -46,8 +47,24 @@ def _record(path, name):
     return record
 
 
+def _local_packed_refs_digest(path):
+    """sha256 of packed-refs restricted to refs/heads and refs/tags (plus their
+    peeled ^ lines): `git fetch --prune` rewrites the file for remote refs."""
+    keep, kept = [], False
+    for line in path.read_bytes().splitlines():
+        if line.startswith(b'^'):
+            if kept:
+                keep.append(line)
+            continue
+        ref = line.split(b' ', 1)[1] if b' ' in line else b''
+        kept = ref.startswith((b'refs/heads/', b'refs/tags/'))
+        if kept:
+            keep.append(line)
+    return hashlib.sha256(b'\n'.join(keep)).hexdigest()
+
+
 def git_internals(root):
-    """Hash HEAD, config, packed-refs, hooks/, info/ and refs/ of the git dir and
+    """Hash HEAD, config, packed-refs, hooks/, info/, refs/heads/ and refs/tags/ of the git dir and
     (for linked worktrees, where .git is a file) the common dir."""
     dirs = {}
     for label, flag in (('gitdir', '--git-dir'), ('common', '--git-common-dir')):
@@ -61,6 +78,8 @@ def git_internals(root):
     for label, d in dirs.items():
         for name in GIT_FILES:
             rec = _record(d / name, name)
+            if rec is not None and name == 'packed-refs' and 'sha256' in rec:
+                rec['sha256'] = _local_packed_refs_digest(d / name)
             if rec is not None:
                 out[f'{label}:{name}'] = rec
         for tree in GIT_TREES:

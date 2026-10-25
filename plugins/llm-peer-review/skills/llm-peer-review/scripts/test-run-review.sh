@@ -304,6 +304,21 @@ RC=$?
 [ "$RC" -eq 2 ] && ok "REVIEW_DIR inside project exits 2" || fail "REVIEW_DIR inside project exits 2 (rc=$RC)"
 check "REVIEW_DIR inside project starts no voice" test ! -s "$CALLS"
 
+# Relative PATH entries must not let the reviewed project supply a CLI.
+mkproj dirty
+mkdir -p "$PROJ/bin"
+printf '#!/bin/bash\necho project-claude >> "$CALL_LOG"\nexit 0\n' > "$PROJ/bin/claude"
+chmod +x "$PROJ/bin/claude"
+: > "$CALLS"
+( cd "$PROJ" && env PATH="bin:.:$FAKE_BIN:$PATH" HOME="$FAKE_HOME" TMPDIR="$T/tmp" \
+    PEERREVIEW_CODEX_BIN="$FAKE_BIN/codex" PEERREVIEW_AGY_SYSTEM_PATHS="" \
+    REVIEW_POLL_INTERVAL=1 REVIEW_STALE_ITERS=20 CALL_LOG="$CALLS" FAKE_FIXTURES="$FIX" \
+    bash "$RUN" --root . --voices claude > "$T/out" 2> "$T/err" < /dev/null )
+RC=$?
+[ "$RC" -eq 0 ] && ok "relative PATH run exits 0" || { fail "relative PATH run exits 0 (rc=$RC)"; cat "$T/err" >&2; }
+check "relative PATH entry cannot supply claude from the project" test -z "$(grep project-claude "$CALLS")"
+rm -rf -- "$PROJ/bin"
+
 # Final assertion: this test run must leave no fake process behind.
 sleep 1
 check "no fake process of this run remains" test -z "$(pgrep -f "$LEFTOVER_RE")"
