@@ -89,12 +89,15 @@ er JSON (`CAPACITY`, `REFUSED`, `MISFIRE`). Schemaet har bevidst ingen
 - `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1` undgår projektets Claude-memory;
   `--setting-sources user` undgår projekt- og lokale settings.
 - `--strict-mcp-config` uden `--mcp-config` starter stemmen uden MCP-servere
-  (brugerens og projektets `.mcp.json` ignoreres). Brugerens plugins og hooks
-  indlæses stadig via `--setting-sources user`.
-- Kandidater til at evaluere (ikke verificeret med et live-kald, derfor ikke
-  brugt): `--safe-mode` (slår skills, plugins, hooks, MCP og CLAUDE.md fra) og
-  `--restricted`. Kræver en måling af, at `--json-schema`, `--tools` og auth
-  stadig virker.
+  (brugerens og projektets `.mcp.json` ignoreres).
+- `--safe-mode` slår brugerens customizations fra (installerede plugins' skills,
+  hooks, MCP, CLAUDE.md, custom commands). Målt 2026-10-25 med Claude Code
+  2.1.309 via `--output-format stream-json` init-eventet: uden flaget kørte to
+  SessionStart-hooks, med flaget ingen. Skills faldt fra 102 til 19 og
+  slash-commands fra 138 til 55, mens tools (`Glob, Grep, Read`) og MCP (`[]`) var
+  uændrede. Et live review med `--json-schema` gav `VALID`. Init-listen viser
+  stadig plugin-navnene (n=1-måling; genmål efter en Claude Code-opgradering).
+  `--restricted` er ikke evalueret.
 - Kun `Read,Glob,Grep`; `Agent` og `Task` er forbudt.
 - `--permission-mode dontAsk`, aldrig bypass.
 - Systemprompten erstattes af en single-reviewer-kontrakt, så revieweren ikke

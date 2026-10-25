@@ -1,1 +1,4 @@
-Portions of prompts/adversarial-review.md, prompts/review.md (grounding/calibration rules) and schemas/review-output.schema.json are derived from openai/codex-plugin-cc, Copyright 2026 OpenAI, licensed under the Apache License 2.0.
+llm-peer-review
+Copyright (c) 2026 Tobias Jul Kastrup. Licensed under the MIT License (see LICENSE).
+
+Portions of prompts/adversarial-review.md, prompts/review.md (grounding/calibration rules) and schemas/review-output.schema.json are derived from openai/codex-plugin-cc, Copyright 2026 OpenAI, licensed under the Apache License 2.0. A copy of that licence is in LICENSES/Apache-2.0.txt. These portions have been modified (adapted to a three-reviewer JSON contract, translated framing, and a `checked` field added to the schema).

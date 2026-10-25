@@ -58,3 +58,7 @@ Kopiér eller symlink den til Codex' skills-mappe og start med `$llm-peer-review
 
 - [openai/codex-plugin-cc](https://github.com/openai/codex-plugin-cc): plugin-format, commands og dele af review-prompts og skema (Apache-2.0, se `NOTICE`).
 - [antigravity-plugin-cc](https://github.com/simplybychris/antigravity-plugin-cc): idéen til `setup`-kommandoen og brugen af `agy`.
+
+## Licens
+
+MIT (se `LICENSE`). Dele af prompts og schema stammer fra openai/codex-plugin-cc (Apache-2.0); se `NOTICE` og `LICENSES/Apache-2.0.txt`.

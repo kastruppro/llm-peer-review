@@ -4,5 +4,6 @@
   "description": "Run three independent LLM reviews (Claude, Gemini, Codex) in parallel and aggregate schema-valid verdicts into an evidence-based consensus.",
   "author": {
     "name": "Tobias Jul Kastrup"
-  }
+  },
+  "license": "MIT"
 }

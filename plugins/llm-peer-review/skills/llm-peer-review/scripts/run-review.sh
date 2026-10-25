@@ -247,6 +247,7 @@ if [ "$WANT_CLAUDE" -eq 1 ]; then
       --effort "$CLAUDE_EFFORT" \
       --setting-sources user \
       --strict-mcp-config \
+      --safe-mode \
       --tools "Read,Glob,Grep" \
       --disallowedTools "Agent" "Task" \
       --permission-mode dontAsk \

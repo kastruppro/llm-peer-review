@@ -47,6 +47,7 @@ done
 case "$shared" in */shared) [ -d "$shared" ] || exit 96 ;; *) exit 96 ;; esac
 [ -n "$schema" ] || exit 95
 case " $* " in *" --strict-mcp-config "*) ;; *) exit 93 ;; esac
+case " $* " in *" --safe-mode "*) ;; *) exit 92 ;; esac
 [ -n "${*: -1}" ] || exit 94
 if [ "${FAKE_CLAUDE_MODE:-}" = hang ]; then exec sleep "$FAKE_MARKER"; fi
 if [ "${FAKE_CLAUDE_MODE:-}" = error ]; then
