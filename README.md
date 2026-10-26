@@ -15,7 +15,7 @@ Efter rapporten stopper flowet og spørger, hvilke findings der skal rettes. Int
 /llm-peer-review:setup
 ```
 
-Repoet er privat, så `marketplace add` kræver git-adgang til `kastruppro/llm-peer-review`. Fra en lokal klon kan du i stedet bruge stien: `/plugin marketplace add /sti/til/llm-peer-review`.
+Fra en lokal klon kan du i stedet bruge stien: `/plugin marketplace add /sti/til/llm-peer-review`.
 
 `/llm-peer-review:setup` kører preflight og tilbyder at installere manglende CLI'er (efter bekræftelse).
 

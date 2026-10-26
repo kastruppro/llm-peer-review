@@ -407,6 +407,6 @@ Status 2026-10-24: alle 10 tasks er leveret. Den afsluttende review (`CODE_REVIE
 - [x] NOTICE krediterer Apache-2.0-tekst fra codex-plugin-cc, men en kopi af licensen mangler (Apache §4(a)). Løst 2026-10-25: `LICENSES/Apache-2.0.txt`, og NOTICE noterer ændringerne.
 - [ ] Plugin-directory-profilen vil have en LICENSE og et ikon. LICENSE (MIT) og `"license": "MIT"` blev tilføjet 2026-10-25. Ikonet mangler stadig.
 - [ ] agy variant d (`--mode plan --sandbox`) er målt én gang (n=1). Genmål den efter hver agy-opgradering.
-- [ ] Den interaktive installation (`/plugin marketplace add kastruppro/llm-peer-review`, `/plugin install …`) er ikke testet live. Repoet er nu på GitHub (privat), så det kan testes.
+- [ ] Den interaktive installation (`/plugin marketplace add kastruppro/llm-peer-review`, `/plugin install …`) er ikke testet live. Repoet er nu offentligt på GitHub, så det kan testes.
 - [x] `snapshot.py` hasher `refs/**`, så `git fetch` under et review giver en falsk exit `4`. Rettet 2026-10-25: kun `refs/heads`/`refs/tags` og de lokale linjer i `packed-refs` (test i test-snapshot.py).
 - [x] Brede fund (>40 linjer) fra flere stemmer flettes aldrig automatisk, så antallet af stemmer kan blive for lavt. Rettet 2026-10-25: to brede fund fra forskellige stemmer flettes, når start og slut ligger inden for ±3 (test i test-review-json.py).
