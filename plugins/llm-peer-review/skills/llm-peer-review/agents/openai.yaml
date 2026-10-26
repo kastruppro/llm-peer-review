@@ -1,4 +1,4 @@
 interface:
   display_name: "LLM Peer Review"
-  short_description: "Kør tre uafhængige LLM-reviews med konsensus"
+  short_description: "Run three independent LLM reviews with consensus"
   default_prompt: "Use $llm-peer-review to run an independent three-model review of this repository before making fixes."

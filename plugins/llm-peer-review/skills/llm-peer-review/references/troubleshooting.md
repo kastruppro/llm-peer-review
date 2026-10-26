@@ -1,86 +1,88 @@
-# Verdicts og recovery
+# Verdicts and recovery
 
 ## Verdicts
 
-Gyldighed afgøres af JSON-skemaet (`review_json.py`), ikke af tekstmønstre. Se
-`verdicts.txt` i run-mappen for hver stemmes verdict.
+Validity is decided by the JSON schema (`review_json.py`), not by text patterns. See
+`verdicts.txt` in the run directory for each voice's verdict.
 
-| Verdict | Betydning | Handling |
+| Verdict | Meaning | Action |
 |---|---|---|
-| `VALID` | Skema-gyldigt JSON med mindst én finding | Tæl som stemme |
-| `CLEAN` | Skema-gyldigt: `approve`, 0 findings og ikke-tom `checked` | Tæl som gyldig nul-finding-stemme |
-| `WEAK` | Ikke skema-gyldigt JSON (eller `needs-attention` uden findings, eller ukendelig prosa) | Inspicér rå output; relaunch én gang |
-| `ERROR` | CLI- eller envelope-fejl (fx `is_error`, agy ikke `SUCCESS`) | Læs `.err`, ret årsagen og relaunch én gang |
-| `MISFIRE` | Reviewer roleplayede orchestrator | Relaunch én gang (ny run-mappe) |
-| `CAPACITY` | Auth, quota, netværk eller modelkapacitet | Kontrollér CLI/auth og relaunch én gang |
-| `REFUSED` | Gemini over-refusal | Wrapperen genformulerer neutralt én gang. Overlever afvisningen det, hjælper et relaunch med samme model sjældent: aggregér som 2-stemmers review og notér den manglende Google-stemme, eller ret `gemini.model` i `models.json` (se dens `note`) og relaunch kun Gemini med `--voices gemini` (SKILL.md §4) |
-| `EMPTY` / `MISSING` | Intet brugbart output (under 40 bytes / filen findes ikke) | Kontrollér PID, sti og stderr |
+| `VALID` | Schema-valid JSON with at least one finding | Counts as a voice |
+| `CLEAN` | Schema-valid: `approve`, 0 findings and non-empty `checked` | Counts as a valid zero-finding voice |
+| `WEAK` | Not schema-valid JSON (or `needs-attention` without findings, or unrecognizable prose) | Inspect the raw output; relaunch once |
+| `ERROR` | CLI or envelope failure (e.g. `is_error`, agy not `SUCCESS`) | Read `.err`, fix the cause and relaunch once |
+| `MISFIRE` | Reviewer role-played the orchestrator | Relaunch once (new run directory) |
+| `CAPACITY` | Auth, quota, network or model capacity | Check the CLI/auth and relaunch once |
+| `REFUSED` | Gemini over-refusal | The wrapper rephrases neutrally once. If the refusal survives that, a relaunch with the same model rarely helps: aggregate as a 2-voice review and note the missing Google voice, or fix `gemini.model` in `models.json` (see its `note`) and relaunch only Gemini with `--voices gemini` (SKILL.md §4) |
+| `EMPTY` / `MISSING` | No usable output (under 40 bytes / the file does not exist) | Check the PID, path and stderr |
 
-Kun `VALID` og `CLEAN` tæller. En stemme, der stadig ikke er gyldig efter ét
-relaunch, markeres som manglende (`MANGLER (...)` i `aggregate.md`). Dens
-tavshed må aldrig bruges som enighed. Relaunch-opskriften står i SKILL.md §4.
+Only `VALID` and `CLEAN` count. A voice that is still not valid after one
+relaunch is marked as not counted (`NOT COUNTED (<class>)` in `aggregate.md`, e.g.
+`NOT COUNTED (MISSING)` or `NOT COUNTED (WEAK)`). Its silence must never be used
+as agreement. The relaunch recipe is in SKILL.md §4.
 
-## Exitkoder fra run-review.sh
+## Exit codes from run-review.sh
 
-- **`2`:** preflight (manglende CLI, `jq`, `agy`-auth, ingen kompatibel Codex),
-  forkert argument (også `--base` sammen med `--scope working-tree|full`), run-mappe inde i projektet, watcher-fejl eller timeout.
-  Stemmernes processer er stoppet, og der er ingen `aggregate.md`. Læs stderr.
-- **`3`:** `prepare_review.py` fandt intet at reviewe. Brug `--scope full` eller
-  `--base <ref>`.
-- **`4`:** snapshot-diffen (projektet inkl. `.git`-kontrolfiler) eller
-  `shared/`-checksummen er ikke tom. Find årsagen (editor, formatter,
-  watcher-proces, `git commit`/`checkout`, en reviewer der skrev) og kør alle stemmer igen.
-  Et almindeligt `git fetch` giver ikke længere exit `4` (fjern-refs hashes ikke).
-- **`130`/`143`:** afbrudt; run-mappen er bevaret.
+- **`2`:** preflight (missing CLI, `jq`, `agy` auth, no compatible Codex),
+  wrong argument (also `--base` together with `--scope working-tree|full`), run directory inside the project, watcher failure or timeout.
+  The voices' processes are stopped, and there is no `aggregate.md`. Read stderr.
+- **`3`:** `prepare_review.py` found nothing to review
+  (`Nothing to review in <label>; use --scope full or --base <ref>`). Use
+  `--scope full` or `--base <ref>`.
+- **`4`:** the snapshot diff (the project incl. `.git` control files) or the
+  `shared/` checksum is not empty. Find the cause (editor, formatter,
+  watcher process, `git commit`/`checkout`, a reviewer that wrote something) and rerun all voices.
+  A plain `git fetch` no longer gives exit `4` (remote refs are not hashed).
+- **`130`/`143`:** interrupted; the run directory is preserved.
 
-## Hyppige fejl
+## Common failures
 
-- **`auto` fejler på et rent træ:** repoet har hverken `origin/HEAD` eller
-  `main`/`master`/`trunk`. Giv `--base <ref>` eller `--scope full`.
-- **Output blandet med stderr:** brug separate filer; ellers fejler JSON og classify.
-- **Forkert model trods succes:** modeller kommer kun fra `models.json` via
-  `models.sh`; Codex får også eksplicit `--model` og reasoning override.
-- **Kendt model afvises fra `agy models`:** nogle AGY-versioner viser
-  `model-id\\tlabel` med bogstavelig `\\t`. Wrapperen skal udtrække det førende
-  tekniske `gemini-*`-ID og matche dét eksakt, ikke hele visningslinjen.
-- **Reviewer-scope varierer:** alle stemmer får samme `shared/prompt.md` og
-  `shared/target.diff`; sammenlign ikke full-tree med diff-only.
-- **`AGENTS.md`, `GEMINI.md` eller anden memory overtager rollen (`MISFIRE`):**
-  se isolationsafsnittene i [hardening](hardening.md). Codex indlæser stadig
-  `~/.agents/skills` og `~/.codex/AGENTS.md`; `MISFIRE` er nettet.
-- **Model returnerer JSON i en ```` ```json ````-fence:** er gyldigt og klassificeres
-  normalt. Kun ét fence om hele objektet accepteres.
-- **`WEAK` på et svar der ligner et review:** valider mod
-  `schemas/review-output.schema.json` (`python3 -I scripts/review_json.py classify <fil>`):
-  ekstra felter, forkert enum, `line_*` under 1 eller `confidence` uden for 0-1
-  giver `WEAK`.
-- **Samme fund står som flere klynger:** `aggregate.md` slår kun sammen på
-  normaliseret sti og linjer inden for ±3 af klyngens første finding (aldrig samme
-  stemme; findings over 40 linjer kun med en lige så bred med start og slut inden for ±3); flet semantisk ens klynger manuelt (§5).
-- **Én klynge rummer flere problemer:** split den (SKILL.md §5); stemmer tæller kun,
-  når de beskriver samme defekt.
-- **Intern AGY-dialog giver falsk `VALID`:** kontrollér `attemptN.raw.json`, men
-  klassificér kun `attemptN.final.md`, der er udtrukket fra envelopen.
-- **Et retry overskriver evidens:** hvert forsøg beholder `attemptN.raw.json`,
-  `attemptN.final.md`, `attemptN.err` og `attemptN.classify.txt`.
-- **Tom `.response` fra agy trods `SUCCESS`:** regn det som fejl; tjek
-  `denied_actions` og stderr (se [hardening](hardening.md)).
-- **Reviewprocessen er væk, men output er tomt:** læs den tilhørende `.err` og
-  kontrollér auth/model før relaunch.
+- **`auto` fails on a clean tree:** the repo has neither `origin/HEAD` nor
+  `main`/`master`/`trunk`. Pass `--base <ref>` or `--scope full`.
+- **Output mixed with stderr:** use separate files; otherwise JSON and classify fail.
+- **Wrong model despite success:** models come only from `models.json` via
+  `models.sh`; Codex also gets an explicit `--model` and reasoning override.
+- **Known model rejected from `agy models`:** some AGY versions show
+  `model-id\\tlabel` with a literal `\\t`. The wrapper must extract the leading
+  technical `gemini-*` ID and match that exactly, not the whole display line.
+- **Reviewer scope varies:** all voices get the same `shared/prompt.md` and
+  `shared/target.diff`; do not compare a full tree with diff-only.
+- **`AGENTS.md`, `GEMINI.md` or other memory takes over the role (`MISFIRE`):**
+  see the isolation sections in [hardening](hardening.md). Codex still loads
+  `~/.agents/skills` and `~/.codex/AGENTS.md`; `MISFIRE` is the safety net.
+- **Model returns JSON in a ```` ```json ```` fence:** this is valid and is classified
+  normally. Only a single fence around the whole object is accepted.
+- **`WEAK` on a response that looks like a review:** validate against
+  `schemas/review-output.schema.json` (`python3 -I scripts/review_json.py classify <file>`):
+  extra fields, a wrong enum, `line_*` below 1 or `confidence` outside 0-1
+  give `WEAK`.
+- **The same finding appears as several clusters:** `aggregate.md` merges only on
+  normalized path and lines within ±3 of the cluster's first finding (never the same
+  voice; findings over 40 lines only with an equally wide one with start and end within ±3); merge semantically identical clusters manually (§5).
+- **One cluster contains several problems:** split it (SKILL.md §5); voices count only
+  when they describe the same defect.
+- **Internal AGY dialog gives a false `VALID`:** check `attemptN.raw.json`, but
+  classify only `attemptN.final.md`, extracted from the envelope.
+- **A retry overwrites evidence:** each attempt keeps `attemptN.raw.json`,
+  `attemptN.final.md`, `attemptN.err` and `attemptN.classify.txt`.
+- **Empty `.response` from agy despite `SUCCESS`:** treat it as a failure; check
+  `denied_actions` and stderr (see [hardening](hardening.md)).
+- **The review process is gone but the output is empty:** read the corresponding `.err` and
+  check auth/model before relaunching.
 
-## For gammel Codex CLI
+## Outdated Codex CLI
 
-Kør `python3 -I "$SKILL_DIR/scripts/resolve-codex.py"` i preflight og brug den returnerede
-absolutte sti som `"$CODEX_BIN" exec`. Helperen kontrollerer PATH, faste
-installationsmapper, npm-pakkens native binær og app-CLI'er med `--version`
-(højst fem sekunder pr. kandidat). Den frasorterer gamle, ukendte og
-prerelease-versioner og ændrer hverken PATH, installationer eller modeller.
+Run `python3 -I "$SKILL_DIR/scripts/resolve-codex.py"` in preflight and use the returned
+absolute path as `"$CODEX_BIN" exec`. The helper checks PATH, fixed
+installation directories, the npm package's native binary and app CLIs with `--version`
+(at most five seconds per candidate). It filters out old, unknown and
+prerelease versions and changes neither PATH, installations nor models.
 
-Hvis ingen kandidat består, ret den vedvarende installation som del af en
-autoriseret CLI-opdatering. Undgå gentagne engangsinstallationer i `/tmp` og
-sænk ikke versionsgrænsen for at få en gammel CLI igennem. Find først ejeren
-med `ls -l /absolut/sti/codex`; opdater med samme pakkemanager. For den lokale
-npm-installation under `/opt/homebrew` er kommandoen:
+If no candidate passes, fix the persistent installation as part of an
+authorized CLI update. Avoid repeated one-off installs in `/tmp` and
+do not lower the version floor to get an old CLI through. First find the owner
+with `ls -l /absolute/path/codex`; update with the same package manager. For the local
+npm installation under `/opt/homebrew` the command is:
 
 ```bash
 /opt/homebrew/bin/npm install --global @openai/codex@latest
@@ -88,24 +90,24 @@ CODEX_BIN="$(python3 -I "$SKILL_DIR/scripts/resolve-codex.py")" || exit 1
 "$CODEX_BIN" --version
 ```
 
-Dette er en særskilt, vedvarende opdatering; resolveren installerer aldrig
-software automatisk under et review. Alternativt kan en eksisterende,
-kompatibel CLI vælges med `PEERREVIEW_CODEX_BIN`. Revurdér versionsgrænsen
-ved et senere modelskift; versionstjekket beviser ikke modeladgang på kontoen.
+This is a separate, persistent update; the resolver never installs
+software automatically during a review. Alternatively, an existing,
+compatible CLI can be selected with `PEERREVIEW_CODEX_BIN`. Reassess the version floor
+at a later model change; the version check does not prove model access on the account.
 
-## Codex-auth
+## Codex auth
 
-Hvis native Codex returnerer 401, invalidated token eller sign-in-fejl, brug den
-lokale Codex-loginmekanisme og verificér auth, før stemmen køres igen. Erstat ikke
-OpenAI-familien med en ekstra Claude- eller Gemini-model.
+If native Codex returns 401, an invalidated token or a sign-in error, use the
+local Codex login mechanism and verify auth before rerunning the voice. Do not replace
+the OpenAI family with an extra Claude or Gemini model.
 
-## Manglende familie
+## Missing family
 
-Hvis en familie ikke kan levere efter én kontrolleret relaunch, fortsæt kun hvis
-brugeren accepterer den reducerede dækning eller opgaven tillader best-effort.
-Rapportér tydeligt:
+If a family cannot deliver after one controlled relaunch, continue only if
+the user accepts the reduced coverage or the task allows best effort.
+Report clearly:
 
-1. hvilken familie der mangler;
-2. sidste verdict og fejlårsag;
-3. at 2-stemmers konsensus er svagere;
-4. hvilke single-reviewer findings der derfor kræver ekstra manuel evidens.
+1. which family is missing;
+2. the last verdict and failure cause;
+3. that a 2-voice consensus is weaker;
+4. which single-reviewer findings therefore require extra manual evidence.

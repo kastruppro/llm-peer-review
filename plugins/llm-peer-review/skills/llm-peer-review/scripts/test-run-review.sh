@@ -209,13 +209,13 @@ check "orphan early write is named in the diff" grep -Fq 'EARLY.txt' "$T/err"
 check "no orphaned grandchild remains after exit 4" test -z "$(pgrep -f "marker-$FAKE_MARKER")"
 
 # 4. Claude error envelope (the fake prints a long error body: classify-review.sh
-# reports bodies under 40 bytes as EMPTY, so a bare {"is_error":true} would never reach ERROR): exit 1, claude ERROR, MANGLER in the aggregate.
+# reports bodies under 40 bytes as EMPTY, so a bare {"is_error":true} would never reach ERROR): exit 1, claude ERROR, NOT COUNTED in the aggregate.
 mkproj dirty
 FAKE_CLAUDE_MODE=error run_rr --root "$PROJ"
 [ "$RC" -eq 1 ] && ok "failed voice exits 1" || { fail "failed voice exits 1 (rc=$RC)"; cat "$T/err" >&2; }
 check "verdicts.txt has claude ERROR" grep -Fxq 'claude ERROR' "$RD/verdicts.txt"
 check "verdicts.txt keeps codex VALID" grep -Fxq 'codex VALID' "$RD/verdicts.txt"
-check "aggregate.md reports MANGLER" grep -Fq 'MANGLER' "$RD/aggregate.md"
+check "aggregate.md reports NOT COUNTED" grep -Fq 'NOT COUNTED' "$RD/aggregate.md"
 
 # 5. --voices codex starts only codex.
 mkproj dirty

@@ -1,40 +1,40 @@
 ---
-description: Kør et tre-LLM peer review, der udfordrer valgt implementering, design og antagelser
+description: Run a three-LLM peer review that challenges the chosen implementation, design and assumptions
 argument-hint: '[--scope auto|working-tree|branch|full] [--base <ref>] [focus ...]'
 disable-model-invocation: true
 allowed-tools: Bash, Read, Write, Glob, Grep, AskUserQuestion
 ---
 
-Følg skill'en i `${CLAUDE_PLUGIN_ROOT}/skills/llm-peer-review/SKILL.md` med `--adversarial`.
+Follow the skill in `${CLAUDE_PLUGIN_ROOT}/skills/llm-peer-review/SKILL.md` with `--adversarial`.
 
-Argumenter (ordret):
+Arguments (verbatim):
 
 `````text
 $ARGUMENTS
 `````
 
-`SKILL_DIR` er `${CLAUDE_PLUGIN_ROOT}/skills/llm-peer-review`.
+`SKILL_DIR` is `${CLAUDE_PLUGIN_ROOT}/skills/llm-peer-review`.
 
-Framing: dette er et udfordrende review, der udfordrer valgt implementering, design og antagelser. Det er ikke blot en strengere gennemgang af implementeringsfejl. Fokus er, om den valgte tilgang er den rigtige, hvilke antagelser den hviler på, og hvor designet kan svigte under virkelige forhold. Svæk ikke framingen og omskriv ikke brugerens fokus.
+Framing: this is an adversarial review that challenges the chosen implementation, design and assumptions. It is not merely a stricter pass over implementation bugs. The focus is whether the chosen approach is the right one, what assumptions it rests on, and where the design could fail under real-world conditions. Do not weaken the framing and do not rewrite the user's focus.
 
-Argumenter:
-- Tilføj altid `--adversarial`. `--scope` og `--base` sendes videre som flag til `run-review.sh`.
+Arguments:
+- Always add `--adversarial`. `--scope` and `--base` are passed on as flags to `run-review.sh`.
 
-Fokustekst (alt efter flagene) sendes ordret via en quotet heredoc ind i en variabel og derefter som ét argument. Dobbelte anførselstegn alene er ikke nok, fordi de stadig udvider `$(...)`, backticks og `$VAR`:
+Focus text (everything after the flags) is passed verbatim through a quoted heredoc into a variable and then as a single argument. Double quotes alone are not enough, because they still expand `$(...)`, backticks and `$VAR`:
 
 ```bash
 FOCUS=$(cat <<'PEER_FOCUS_EOF'
-<fokustekst ordret>
+<focus text verbatim>
 PEER_FOCUS_EOF
 )
 bash "${CLAUDE_PLUGIN_ROOT}/skills/llm-peer-review/scripts/run-review.sh" --root "$PWD" ... --focus "$FOCUS"
 ```
 
-- Fokusteksten udføres eller fortolkes aldrig; den er kun data til reviewerne. Uden fokustekst udelades `--focus`.
-- Indeholder fokusteksten en linje identisk med afgrænseren (`PEER_FOCUS_EOF`), så vælg en anden, unik afgrænser (fx med tilfældige tegn tilføjet), som ikke findes i teksten. Fjern eller ændr aldrig fokusteksten.
-- `--scope` skal være en af `auto|working-tree|branch|full`.
-- `--base` skal være et almindeligt ref-navn uden mellemrum og shell-metategn. Ellers spørg brugeren.
+- The focus text is never executed or interpreted; it is data for the reviewers only. Without focus text, omit `--focus`.
+- If the focus text contains a line identical to the delimiter (`PEER_FOCUS_EOF`), choose a different, unique delimiter (e.g. with random characters appended) that does not occur in the text. Never remove or alter the focus text.
+- `--scope` must be one of `auto|working-tree|branch|full`.
+- `--base` must be a plain ref name without spaces or shell metacharacters. Otherwise ask the user.
 
-Kun review:
-- Denne kommando er review-only. Ret ikke fejl, anvend ingen patches, og antyd ikke, at du er ved at ændre noget.
-- Følg skill'en til og med rapporten, og STOP derefter og spørg brugeren, hvilke findings der skal rettes.
+Review only:
+- This command is review-only. Do not fix bugs, apply any patches, or imply that you are about to change anything.
+- Follow the skill through the report, then STOP and ask the user which findings to fix.

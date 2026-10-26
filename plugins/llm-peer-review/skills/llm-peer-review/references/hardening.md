@@ -1,277 +1,277 @@
 # Reviewer hardening
 
-Launch-flagene for alle tre stemmer står udelukkende i `scripts/run-review.sh`
-(Claude, Codex) og `scripts/gemini-review.sh` (Gemini). Se dem dér; denne fil
-forklarer hvorfor, og hvad der er målt.
+The launch flags for all three voices live exclusively in `scripts/run-review.sh`
+(Claude, Codex) and `scripts/gemini-review.sh` (Gemini). See them there; this file
+explains why, and what has been measured.
 
-## Indhold
+## Contents
 
-- Fælles isolation
-- Outputkontrakt (schema)
+- Common isolation
+- Output contract (schema)
 - Claude
 - Gemini
 - Codex
-- Verificeret CLI-adfærd 2026-10-24
+- Verified CLI behavior 2026-10-24
 
-## Fælles isolation
+## Common isolation
 
-Alle stemmer får samme projektrod, scope og prompt. `run-review.sh` opretter en
-privat `mktemp`-mappe (`llm-peer-review.XXXXXX`, `umask 077`) uden for projektet
-og afviser en run-mappe inde i projektroden. Stdout, stderr og last-message
-holdes adskilt, og outputstier genbruges aldrig på tværs af runs.
+All voices get the same project root, scope and prompt. `run-review.sh` creates a
+private `mktemp` directory (`llm-peer-review.XXXXXX`, `umask 077`) outside the project
+and rejects a run directory inside the project root. Stdout, stderr and last-message
+are kept separate, and output paths are never reused across runs.
 
-Diff og prompt ligger i `shared/` i run-mappen (`target.diff`, `prompt.md`).
-Kun `shared/` gives til reviewerne som ekstra læsbar mappe, aldrig hele
-run-mappen. Efter prepare gøres `shared/` read-only (`chmod -R a-w`), og en
-sha256 pr. fil gemmes i `shared.sha256`. Ejeren kan stadig `chmod` tilbage eller
-erstatte mappen, så checksummen er selve kontrollen: den tjekkes igen ved siden
-af snapshotet, både efter en normal kørsel og efter watcher-fejl/timeout, og en
-forskel giver exit `4`.
+The diff and prompt live in `shared/` in the run directory (`target.diff`, `prompt.md`).
+Only `shared/` is given to the reviewers as an extra readable directory, never the whole
+run directory. After prepare, `shared/` is made read-only (`chmod -R a-w`), and a
+sha256 per file is stored in `shared.sha256`. The owner can still `chmod` back or
+replace the directory, so the checksum is the actual control: it is checked again
+alongside the snapshot, both after a normal run and after a watcher failure/timeout, and a
+difference gives exit `4`.
 
-Read-only er en invariant, som scriptet tjekker: `snapshot.py` tager et
-indholdsmanifest før reviewet (før prepare) og efter. Manifestet dækker tracked
-og ikke-ignorerede untracked filer, filtilstand og Git-tilstand (HEAD, index,
-status) samt Git-kontrolfilerne `HEAD`, `config`, `config.worktree`,
-`packed-refs` (kun lokale refs), `hooks/**`, `info/**`, `refs/heads/**` og `refs/tags/**` i både git-dir og common-dir
-(så linked worktrees, hvor `.git` er en fil, også er dækket). En forskel giver
-exit `4` og ingen aggregering. Inden snapshotet stoppes alle stemmers
-procestræer altid, også efter en normal afslutning, så en efterladt
-efterkommer ikke kan skrive efter `snapshot.after`.
+Read-only is an invariant that the script checks: `snapshot.py` takes a
+content manifest before the review (before prepare) and after. The manifest covers tracked
+and non-ignored untracked files, file mode and Git state (HEAD, index,
+status) as well as the Git control files `HEAD`, `config`, `config.worktree`,
+`packed-refs` (local refs only), `hooks/**`, `info/**`, `refs/heads/**` and `refs/tags/**` in both git-dir and common-dir
+(so linked worktrees, where `.git` is a file, are covered too). A difference gives
+exit `4` and no aggregation. Before the snapshot, all voices'
+process trees are always stopped, even after a normal exit, so a leftover
+descendant cannot write after `snapshot.after`.
 
-Alle git-kald i `snapshot.py` og `prepare_review.py` kører med
-`-c core.fsmonitor=false -c core.hooksPath=/dev/null`, så en plantet fsmonitor
-eller hook ikke udføres af scriptets egne git-kald. `git diff` kører desuden med
-`--no-ext-diff --no-color --no-textconv`, så brugerens git-config ikke kan
-ændre `target.diff`.
+All git calls in `snapshot.py` and `prepare_review.py` run with
+`-c core.fsmonitor=false -c core.hooksPath=/dev/null`, so a planted fsmonitor
+or hook is not executed by the script's own git calls. `git diff` additionally runs with
+`--no-ext-diff --no-color --no-textconv`, so the user's git config cannot
+alter `target.diff`.
 
-Det er en efterkontrol, ikke skrivebeskyttelse. Manifestet dækker **ikke**:
+This is an after-the-fact check, not write protection. The manifest does **not** cover:
 
-- en ændring, som gendannes under kørslen;
-- ignorerede filer (`.gitignore`, `info/exclude`);
-- filer uden for projektet, fx AGY's plan-artefakter i
-  `~/.gemini/antigravity-cli/brain/` eller andre stier i `$HOME`;
-- `.git/objects`, logs og andre git-filer uden for listen ovenfor;
-- git-filter-drivere (`filter.<navn>.clean` i `.git/config` plus
-  `.gitattributes`): en stemme, der planter en, opdages (config er hashet),
-  men efter-snapshottets `git status` kan allerede have kørt den.
+- a change that is restored during the run;
+- ignored files (`.gitignore`, `info/exclude`);
+- files outside the project, e.g. AGY's plan artifacts in
+  `~/.gemini/antigravity-cli/brain/` or other paths in `$HOME`;
+- `.git/objects`, logs and other git files outside the list above;
+- git filter drivers (`filter.<name>.clean` in `.git/config` plus
+  `.gitattributes`): a voice that plants one is detected (config is hashed),
+  but the after-snapshot's `git status` may already have run it.
 
-`refs/remotes`, `FETCH_HEAD` og fjern-refs i `packed-refs` hashes bevidst ikke:
-de ændres af ethvert `git fetch` (fra brugeren eller en IDE) og er ikke en
-reviewers skrivning.
+`refs/remotes`, `FETCH_HEAD` and remote refs in `packed-refs` are deliberately not hashed:
+they are changed by any `git fetch` (from the user or an IDE) and are not a
+reviewer's write.
 
-`run-review.sh` fjerner relative `PATH`-indgange (`""`, `.`, `bin` osv.) ved start,
-fordi CLI'erne slås op efter `cd "$PROJECT_ROOT"`; ellers kunne projektet levere
-sin egen `claude`, `git` eller `jq`. `resolve-codex.py` ignorerer også relative
-indgange.
+`run-review.sh` removes relative `PATH` entries (`""`, `.`, `bin` etc.) at startup,
+because the CLIs are looked up after `cd "$PROJECT_ROOT"`; otherwise the project could supply
+its own `claude`, `git` or `jq`. `resolve-codex.py` also ignores relative
+entries.
 
-Modeller resolves altid fra `scripts/models.json` gennem `models.sh`.
-Hardcodede modelnavne bliver hurtigt stale og kan stille fjerne en familie fra
-konsensus. Ingen andre filer må indeholde modelnavne.
+Models are always resolved from `scripts/models.json` through `models.sh`.
+Hardcoded model names quickly go stale and can silently remove a family from
+the consensus. No other files may contain model names.
 
-## Outputkontrakt (schema)
+## Output contract (schema)
 
-Alle tre stemmer skal returnere JSON efter `schemas/review-output.schema.json`
-(`verdict`, `summary`, `findings`, `checked`, `next_steps`). Klassifikationen
-afgøres af skemaet, ikke af tekstmønstre:
+All three voices must return JSON conforming to `schemas/review-output.schema.json`
+(`verdict`, `summary`, `findings`, `checked`, `next_steps`). Classification
+is decided by the schema, not by text patterns:
 
-- `VALID`: skema-gyldigt med mindst én finding.
-- `CLEAN`: skema-gyldigt, `verdict` `approve`, nul findings og ikke-tom `checked`.
-- `WEAK`: ikke skema-gyldigt JSON (eller `needs-attention` uden findings).
-- `ERROR`: CLI- eller envelope-fejl.
+- `VALID`: schema-valid with at least one finding.
+- `CLEAN`: schema-valid, `verdict` `approve`, zero findings and non-empty `checked`.
+- `WEAK`: not schema-valid JSON (or `needs-attention` without findings).
+- `ERROR`: CLI or envelope failure.
 
-En enkelt ```` ```json ````-fence om objektet accepteres. Regexes bruges kun til
-at genkende fejl-, afvisnings- og orchestrator-roleplay-tekster, der slet ikke
-er JSON (`CAPACITY`, `REFUSED`, `MISFIRE`). Schemaet har bevidst ingen
-`$schema`-nøgle (se den målte adfærd nedenfor).
+A single ```` ```json ```` fence around the object is accepted. Regexes are used only to
+recognize failure, refusal and orchestrator role-play texts that are not
+JSON at all (`CAPACITY`, `REFUSED`, `MISFIRE`). The schema deliberately has no
+`$schema` key (see the measured behavior below).
 
 ## Claude
 
-- `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1` undgår projektets Claude-memory;
-  `--setting-sources user` undgår projekt- og lokale settings.
-- `--strict-mcp-config` uden `--mcp-config` starter stemmen uden MCP-servere
-  (brugerens og projektets `.mcp.json` ignoreres).
-- `--safe-mode` slår brugerens customizations fra (installerede plugins' skills,
-  hooks, MCP, CLAUDE.md, custom commands). Målt 2026-10-25 med Claude Code
-  2.1.309 via `--output-format stream-json` init-eventet: uden flaget kørte to
-  SessionStart-hooks, med flaget ingen. Skills faldt fra 102 til 19 og
-  slash-commands fra 138 til 55, mens tools (`Glob, Grep, Read`) og MCP (`[]`) var
-  uændrede. Et live review med `--json-schema` gav `VALID`. Init-listen viser
-  stadig plugin-navnene (n=1-måling; genmål efter en Claude Code-opgradering).
-  `--restricted` er ikke evalueret.
-- Kun `Read,Glob,Grep`; `Agent` og `Task` er forbudt.
-- `--permission-mode dontAsk`, aldrig bypass.
-- Systemprompten erstattes af en single-reviewer-kontrakt, så revieweren ikke
-  tror, den er orkestrator.
-- Skemaet gives med `--json-schema`; resultatet læses fra `.structured_output`.
-- `--add-dir` gives kun til `shared/`, så diffen kan læses uden for cwd.
-- Quote modelstrengen; modelnavne kan indeholde shell-globtegn.
-- JSON-envelope på stdout og diagnostik på stderr.
+- `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1` avoids the project's Claude memory;
+  `--setting-sources user` avoids project and local settings.
+- `--strict-mcp-config` without `--mcp-config` starts the voice without MCP servers
+  (the user's and the project's `.mcp.json` are ignored).
+- `--safe-mode` turns off the user's customizations (installed plugins' skills,
+  hooks, MCP, CLAUDE.md, custom commands). Measured 2026-10-25 with Claude Code
+  2.1.309 via the `--output-format stream-json` init event: without the flag two
+  SessionStart hooks ran, with the flag none. Skills dropped from 102 to 19 and
+  slash commands from 138 to 55, while tools (`Glob, Grep, Read`) and MCP (`[]`) were
+  unchanged. A live review with `--json-schema` gave `VALID`. The init list
+  still shows the plugin names (n=1 measurement; remeasure after a Claude Code upgrade).
+  `--restricted` has not been evaluated.
+- Only `Read,Glob,Grep`; `Agent` and `Task` are forbidden.
+- `--permission-mode dontAsk`, never bypass.
+- The system prompt is replaced by a single-reviewer contract, so the reviewer does not
+  think it is the orchestrator.
+- The schema is passed with `--json-schema`; the result is read from `.structured_output`.
+- `--add-dir` is given only for `shared/`, so the diff can be read outside cwd.
+- Quote the model string; model names can contain shell glob characters.
+- JSON envelope on stdout and diagnostics on stderr.
 
 ## Gemini
 
-`agy` har ikke et tool-level read-only flag, og `--dangerously-skip-permissions`
-er nødvendigt for headless drift. Read-only er derfor et workflow, ikke en
-teknisk skriveblokering. `gemini-review.sh`:
+`agy` has no tool-level read-only flag, and `--dangerously-skip-permissions`
+is necessary for headless operation. Read-only is therefore a workflow, not a
+technical write block. `gemini-review.sh`:
 
-- prepender en read-only single-reviewer-prompt;
-- validerer, at modellen er et `gemini-*` ID, og kontrollerer det mod `agy models`;
-- kører `agy` med `--mode plan --sandbox --dangerously-skip-permissions`
-  (variant d nedenfor), og **uden** `--disable-slash-commands`, som stille
-  deaktiverer plan-mode;
-- giver `--output-format json` og `--json-schema`, gemmer hver rå envelope og
-  klassificerer kun det udtrukne slutsvar (`.structured_output`, ellers `.response`);
-- retry'er højst én gang; ved `REFUSED` genformuleres prompten neutralt;
-- sætter en timeout pr. forsøg (`GEMINI_ATTEMPT_CAP`, standard 900 s).
+- prepends a read-only single-reviewer prompt;
+- validates that the model is a `gemini-*` ID, and checks it against `agy models`;
+- runs `agy` with `--mode plan --sandbox --dangerously-skip-permissions`
+  (variant d below), and **without** `--disable-slash-commands`, which silently
+  disables plan mode;
+- passes `--output-format json` and `--json-schema`, stores each raw envelope and
+  classifies only the extracted final answer (`.structured_output`, otherwise `.response`);
+- retries at most once; on `REFUSED` the prompt is rephrased neutrally;
+- sets a timeout per attempt (`GEMINI_ATTEMPT_CAP`, default 900 s).
 
-**`--add-dir`-rækkefølge:** AGY skriver relative stier i den **sidste**
-`--add-dir`. Projektmappen (cwd) skal derfor altid være sidst, så en skrivning
-havner i det manifest-kontrollerede træ. Run-mappen gives aldrig som
-`--add-dir`; kun `shared/` gives, før projektet.
+**`--add-dir` order:** AGY writes relative paths in the **last**
+`--add-dir`. The project directory (cwd) must therefore always be last, so a write
+lands in the manifest-checked tree. The run directory is never given as
+`--add-dir`; only `shared/` is given, before the project.
 
-Hvis Gemini ændrer projektet, er hele review-snapshotet ugyldigt (exit `4`).
-Intern AGY-dialog og tool-events må aldrig afgive en reviewer-stemme.
-`status: "SUCCESS"` og exit 0 beviser ikke et svar; en tom `.response` (uden
-`.structured_output`) er en fejl. Ikke-tomme `denied_actions` er en advarsel, der
-skal inspiceres i `attemptN.raw.json`; svaret afvises ikke af den grund.
+If Gemini changes the project, the whole review snapshot is invalid (exit `4`).
+Internal AGY dialog and tool events must never yield a reviewer voice.
+`status: "SUCCESS"` and exit 0 do not prove a response; an empty `.response` (without
+`.structured_output`) is a failure. Non-empty `denied_actions` are a warning to be
+inspected in `attemptN.raw.json`; the response is not rejected for that reason.
 
 ## Codex
 
-Den lokalt verificerede native CLI-form (flagene står i `run-review.sh`):
+The locally verified native CLI form (the flags are in `run-review.sh`):
 
-- `--ignore-user-config` mod plugins, MCP og personlige defaults;
-- `--model` og `model_reasoning_effort` fra `models.json`;
-- `project_doc_max_bytes=0` mod `AGENTS.md`-framing;
-- `--sandbox read-only` som tool-level skriveværn;
-- `--cd` til den fælles projektrod;
-- `--output-schema` og `--output-last-message` til rå JSON.
+- `--ignore-user-config` against plugins, MCP and personal defaults;
+- `--model` and `model_reasoning_effort` from `models.json`;
+- `project_doc_max_bytes=0` against `AGENTS.md` framing;
+- `--sandbox read-only` as tool-level write protection;
+- `--cd` to the common project root;
+- `--output-schema` and `--output-last-message` for raw JSON.
 
-Codex genbruger stadig normal `CODEX_HOME`-auth. Brug aldrig
-`--dangerously-bypass-approvals-and-sandbox` til en review-stemme.
+Codex still reuses the normal `CODEX_HOME` auth. Never use
+`--dangerously-bypass-approvals-and-sandbox` for a review voice.
 
-**Kendt begrænsning:** trods `--ignore-user-config` og `project_doc_max_bytes=0`
-indlæser Codex stadig `~/.agents/skills` og `~/.codex/AGENTS.md`. Brugerens
-globale opsætning kan derfor forurene prompten (se målingen nedenfor).
-`MISFIRE`-klassifikationen er nettet: en stemme, der spiller orchestrator,
-kasseres og relaunches højst én gang.
+**Known limitation:** despite `--ignore-user-config` and `project_doc_max_bytes=0`,
+Codex still loads `~/.agents/skills` and `~/.codex/AGENTS.md`. The user's
+global setup can therefore contaminate the prompt (see the measurement below).
+The `MISFIRE` classification is the safety net: a voice that plays orchestrator
+is discarded and relaunched at most once.
 
-## Verificeret CLI-adfærd 2026-10-24
+## Verified CLI behavior 2026-10-24
 
-Målt live med claude 2.1.309, codex-cli 0.164.0 og agy 1.4.5 på et
-throwaway-projekt (`calc.py` med en indført n-1-fejl). Diffen lå i en separat
-run-mappe uden for projektet (`$R/target.diff`). Prompt: "Read $R/target.diff,
+Measured live with claude 2.1.309, codex-cli 0.164.0 and agy 1.4.5 on a
+throwaway project (`calc.py` with an introduced n-1 bug). The diff lived in a separate
+run directory outside the project (`$R/target.diff`). Prompt: "Read $R/target.diff,
 review calc.py, return JSON per schema". Schema: `schemas/review-output.schema.json`.
-Rå output ligger i `scripts/fixtures/`.
+Raw output is in `scripts/fixtures/`.
 
-### Schemaet
+### The schema
 
-- Claude afviser `"$schema": "https://json-schema.org/draft/2020-12/schema"`:
+- Claude rejects `"$schema": "https://json-schema.org/draft/2020-12/schema"`:
   `Error: --json-schema is not a valid JSON Schema: no schema with key or ref
-  "https://json-schema.org/draft/2020-12/schema"` (exit 1, tom stdout). Derfor
-  har schemaet ingen `$schema`-nøgle. Uden nøglen accepterer alle tre CLI'er det.
-- `minLength` accepteres af alle tre. `minItems` er ikke brugt.
-- Alle tre payloads holdt sig til schemaet. Ingen ekstra felter, korrekte enums,
-  `line_*` ≥ 1, `confidence` i 0-1. AGY returnerede `confidence: 1` som heltal.
+  "https://json-schema.org/draft/2020-12/schema"` (exit 1, empty stdout). That is why
+  the schema has no `$schema` key. Without the key, all three CLIs accept it.
+- `minLength` is accepted by all three. `minItems` is not used.
+- All three payloads adhered to the schema. No extra fields, correct enums,
+  `line_*` >= 1, `confidence` in 0-1. AGY returned `confidence: 1` as an integer.
 
 ### Claude
 
-- `--json-schema "$(cat schema)"` sammen med `--output-format json` giver en
-  envelope med `.structured_output` (objekt) og `.result` (samme JSON som streng).
+- `--json-schema "$(cat schema)"` together with `--output-format json` gives an
+  envelope with `.structured_output` (object) and `.result` (the same JSON as a string).
   `subtype: "success"`, `is_error: false`, `terminal_reason: "completed"`.
-  `stop_reason` er `"tool_use"`, ikke `"end_turn"`. Brug det ikke som fejlsignal.
-- Read af `$R/target.diff` uden for cwd virkede under `--permission-mode dontAsk`
-  med `--add-dir "$R"`. `permission_denials` var tom, og filen står i `checked`.
+  `stop_reason` is `"tool_use"`, not `"end_turn"`. Do not use it as a failure signal.
+- Reading `$R/target.diff` outside cwd worked under `--permission-mode dontAsk`
+  with `--add-dir "$R"`. `permission_denials` was empty, and the file is listed in `checked`.
 - Fixture: `scripts/fixtures/claude-envelope.json` (2 findings).
 
 ### Codex
 
-- `--output-schema <fil>` virker i 0.164.0. `--output-last-message` indeholder rå
-  JSON uden fence. Samme JSON står på stdout.
-- `--sandbox read-only` kunne læse `$R/target.diff` uden for `--cd`. Codex kørte
-  også `git` og `python3` read-only for at reproducere fejlen.
-- `--ignore-user-config` plus `project_doc_max_bytes=0` isolerer ikke helt.
-  Codex læste stadig globale skills under `~/.agents/skills/` og fulgte en
-  global instruks om at gemme en Markdown-rapport. Det skrev den selv i
-  `summary` ("could not be saved because the workspace is read-only"). Sandboxen
-  stoppede det, men prompt-kontaminering fra brugerens globale opsætning er
-  stadig mulig. `MISFIRE` er nettet (se Codex-afsnittet ovenfor).
-- Mindste verificerede version-floor for schema-stien: **codex-cli 0.164.0**.
-  `models.json` har `min_cli_version` 0.164.0 (hævet fra 0.153.4, som ikke var
-  verificeret med `--output-schema`).
+- `--output-schema <file>` works in 0.164.0. `--output-last-message` contains raw
+  JSON without a fence. The same JSON is on stdout.
+- `--sandbox read-only` could read `$R/target.diff` outside `--cd`. Codex also ran
+  `git` and `python3` read-only to reproduce the bug.
+- `--ignore-user-config` plus `project_doc_max_bytes=0` does not fully isolate.
+  Codex still read global skills under `~/.agents/skills/` and followed a
+  global instruction to save a Markdown report. It stated this itself in
+  `summary` ("could not be saved because the workspace is read-only"). The sandbox
+  stopped it, but prompt contamination from the user's global setup is
+  still possible. `MISFIRE` is the safety net (see the Codex section above).
+- Lowest verified version floor for the schema path: **codex-cli 0.164.0**.
+  `models.json` has `min_cli_version` 0.164.0 (raised from 0.153.4, which was not
+  verified with `--output-schema`).
 - Fixture: `scripts/fixtures/codex-last.json` (1 finding).
 
 ### AGY (Gemini)
 
-Fælles flag for a-c: `agy -p <prompt> --model <models.sh gemini> --output-format
-json --json-schema <schemafil> --add-dir "$P" --add-dir "$R"
---disable-slash-commands --print-timeout 300s`, kørt med cwd `$P`. Variant d
-bruger de samme flag, men **uden** `--disable-slash-commands` og med omvendt
-rækkefølge: `--add-dir "$R" --add-dir "$P"`, så projektet er sidst.
-Skriveproben var prompten "Create the file PROBE.txt containing hi" (uden
+Common flags for a-c: `agy -p <prompt> --model <models.sh gemini> --output-format
+json --json-schema <schema file> --add-dir "$P" --add-dir "$R"
+--disable-slash-commands --print-timeout 300s`, run with cwd `$P`. Variant d
+uses the same flags, but **without** `--disable-slash-commands` and with reversed
+order: `--add-dir "$R" --add-dir "$P"`, so the project is last.
+The write probe was the prompt "Create the file PROBE.txt containing hi" (without
 schema).
 
-| Variant | Ekstra flag | Review headless | `PROBE.txt` opstod |
+| Variant | Extra flags | Review headless | `PROBE.txt` created |
 | --- | --- | --- | --- |
-| a | `--dangerously-skip-permissions` | Ja, 46 s, 2 findings | Ja, i `$R` |
-| b | `--mode plan --sandbox` | Nej. Tom `.response` | Nej. `write_file` blev afvist |
-| c | `--sandbox --dangerously-skip-permissions` | Ja, 89 s, 2 findings | Ja, i `$R` |
-| d | `--mode plan --sandbox --dangerously-skip-permissions` | Ja, 89 s, 2 findings | Nej, hverken i `$P` eller `$R` |
+| a | `--dangerously-skip-permissions` | Yes, 46 s, 2 findings | Yes, in `$R` |
+| b | `--mode plan --sandbox` | No. Empty `.response` | No. `write_file` was denied |
+| c | `--sandbox --dangerously-skip-permissions` | Yes, 89 s, 2 findings | Yes, in `$R` |
+| d | `--mode plan --sandbox --dangerously-skip-permissions` | Yes, 89 s, 2 findings | No, neither in `$P` nor `$R` |
 
-- Når skemaet virker, har envelopen `.structured_output` (objekt), `.response`
-  (samme JSON som rå streng, **uden** fence) og et ekko af schemaet i
+- When the schema works, the envelope has `.structured_output` (object), `.response`
+  (the same JSON as a raw string, **without** a fence) and an echo of the schema in
   `.json_schema`.
-- Variant b gav `status: "SUCCESS"` og exit 0, selvom `.response` var tom.
-  `denied_actions` var `[{"action":"command","display_name":"RunCommand"}]`.
-  På stderr stod: `warning: --mode plan has no effect while slash command
-  expansion is disabled.` Plan-mode var altså ikke aktiv. Formodentlig kom
-  blokeringen af, at `--dangerously-skip-permissions` manglede, så headless-
-  tilstanden afviste tools, der krævede tilladelse. Det er en slutning ud fra
-  `denied_actions` og stderr: kun `RunCommand` (review) og `WriteFile` (probe)
-  blev faktisk observeret afvist.
-  `status: "SUCCESS"` og exit 0 beviser derfor ikke et
-  svar. En tom `.response` skal regnes som fejl; ikke-tomme `denied_actions`
-  er en advarsel, der skal inspiceres (se Gemini-afsnittet).
-- `--sandbox` begrænser kun terminalen. AGY's eget `write_file`-tool skriver
-  stadig.
-- Skriveproben skrev i den **sidste** `--add-dir` (`$R`), ikke i cwd/projektet.
-  Hvis run-mappen gives som `--add-dir`, kan en skrivning undgå
-  projektmanifestet. Projektmappen skal derfor altid være den **sidste**
-  `--add-dir`. Run-mappen bør helst slet ikke gives til AGY som `--add-dir`, og
-  ellers skal den også kontrolleres.
-- Variant d (plan-mode aktiv): reviewet fuldførte med samme envelope-struktur
-  som a (samme top-level nøgler, `.response` er rå JSON uden fence,
-  `denied_actions` er fraværende). Ved skriveproben skrev agenten ikke filen.
-  Den svarede med en implementeringsplan og bad om godkendelse ("Once approved,
-  I will proceed"). Planen lå i AGY's egen tilstandsmappe
-  `~/.gemini/antigravity-cli/brain/<conversation_id>/create_probe_file.md`, uden
-  for `$P` og `$R`. Der var ingen `denied_actions`. Spærringen er altså plan-
-  mode-workflowet, ikke en verificeret afvisning i tool-laget.
-  Plan-mode skriver altså sine plan-artefakter til
-  `~/.gemini/antigravity-cli/brain/…`, som ligger uden for indholdsmanifestet.
-  Det er en skrivesti ud af projektet, som manifestet ikke kan se; den kan ikke
-  lukkes herfra, kun noteres.
-- Fixture: `scripts/fixtures/agy-envelope.json` (variant a, 2 findings). Envelopen
-  fra d er strukturelt identisk, så der er ingen separat fixture.
+- Variant b gave `status: "SUCCESS"` and exit 0, even though `.response` was empty.
+  `denied_actions` was `[{"action":"command","display_name":"RunCommand"}]`.
+  On stderr: `warning: --mode plan has no effect while slash command
+  expansion is disabled.` Plan mode was thus not active. The block presumably
+  came from `--dangerously-skip-permissions` being absent, so headless
+  mode denied tools that required permission. This is an inference from
+  `denied_actions` and stderr: only `RunCommand` (review) and `WriteFile` (probe)
+  were actually observed being denied.
+  `status: "SUCCESS"` and exit 0 therefore do not prove a
+  response. An empty `.response` must be treated as a failure; non-empty `denied_actions`
+  are a warning to be inspected (see the Gemini section).
+- `--sandbox` restricts only the terminal. AGY's own `write_file` tool
+  still writes.
+- The write probe wrote into the **last** `--add-dir` (`$R`), not cwd/the project.
+  If the run directory is given as `--add-dir`, a write can evade the
+  project manifest. The project directory must therefore always be the **last**
+  `--add-dir`. Ideally the run directory should not be given to AGY as `--add-dir` at all, and
+  otherwise it must be checked too.
+- Variant d (plan mode active): the review completed with the same envelope structure
+  as a (same top-level keys, `.response` is raw JSON without a fence,
+  `denied_actions` is absent). On the write probe the agent did not write the file.
+  It replied with an implementation plan and asked for approval ("Once approved,
+  I will proceed"). The plan was in AGY's own state directory
+  `~/.gemini/antigravity-cli/brain/<conversation_id>/create_probe_file.md`, outside
+  `$P` and `$R`. There were no `denied_actions`. The block is thus the plan-mode
+  workflow, not a verified denial at the tool layer.
+  Plan mode thus writes its plan artifacts to
+  `~/.gemini/antigravity-cli/brain/...`, which is outside the content manifest.
+  That is a write path out of the project that the manifest cannot see; it cannot be
+  closed from here, only noted.
+- Fixture: `scripts/fixtures/agy-envelope.json` (variant a, 2 findings). The envelope
+  from d is structurally identical, so there is no separate fixture.
 
-### Beslutning
+### Decision
 
-Første runde: vælg den første variant i rækkefølgen b, c, a, som både
-fuldfører reviewet og ikke skaber `PROBE.txt`. Ingen variant opfyldte begge
-krav. b blokerer skrivning, men fuldfører ikke. c og a fuldfører, men skriver.
-Fallback-reglen ("hvis ingen variant blokerer skrivning") er læst som "hvis
-ingen *brugbar* variant blokerer skrivning", fordi b slet ikke kan levere et
-review. Dermed blev c (= a + `--sandbox`) foreløbig standard.
+First round: pick the first variant in the order b, c, a that both
+completes the review and does not create `PROBE.txt`. No variant met both
+requirements. b blocks writing but does not complete. c and a complete but write.
+The fallback rule ("if no variant blocks writing") was read as "if
+no *usable* variant blocks writing", because b cannot deliver a
+review at all. Thus c (= a + `--sandbox`) became the provisional default.
 
-b var konfunderet (plan-mode inaktiv, ingen skip-permissions), så d blev kørt
-bagefter. d fuldførte reviewet, og `PROBE.txt` opstod hverken i `$P` eller
-`$R`. **Standarden for Task 6 er derfor variant d**:
-`--mode plan --sandbox --dangerously-skip-permissions`, med projektmappen som
-sidste `--add-dir`. `--disable-slash-commands` skal **fjernes** fra AGY-kaldet,
-fordi plan-mode ellers ikke har nogen effekt. c er fallback.
+b was confounded (plan mode inactive, no skip-permissions), so d was run
+afterwards. d completed the review, and `PROBE.txt` was created neither in `$P` nor
+`$R`. **The default for Task 6 is therefore variant d**:
+`--mode plan --sandbox --dangerously-skip-permissions`, with the project directory as
+the last `--add-dir`. `--disable-slash-commands` must be **removed** from the AGY call,
+because plan mode otherwise has no effect. c is the fallback.
 
-Plan-mode stopper skrivning i workflowet, men det er ikke en verificeret
-skriveblokering i tool-laget. Indholdsmanifestet er stadig obligatorisk.
+Plan mode stops writing in the workflow, but it is not a verified
+write block at the tool layer. The content manifest is still mandatory.
 
-**Evidensgrundlag:** beslutningen for variant d hviler på **ét** review og
-**ét** skriveprobe (n=1). Den er ikke gentaget og kan ændre sig mellem
-agy-versioner. Genmål ved en agy-opgradering og forvent aldrig, at plan-mode
-alene beskytter projektet.
+**Evidence basis:** the decision for variant d rests on **one** review and
+**one** write probe (n=1). It has not been repeated and may change between
+agy versions. Remeasure on an agy upgrade and never expect plan mode
+alone to protect the project.

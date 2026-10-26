@@ -1,12 +1,24 @@
 # llm-peer-review
 
-Tre uafhængige LLM-reviews af samme kode, aggregeret til en evidensbaseret konsensus.
+Three independent LLM reviews of the same code, aggregated into an evidence-based consensus.
 
-Reviewerne er Claude (Claude CLI), Gemini (Antigravity CLI `agy`) og Codex (native Codex CLI). De læser det samme stabile, read-only snapshot og returnerer JSON efter `schemas/review-output.schema.json`. Kun schema-gyldige svar tæller som stemme, og findings, som flere stemmer peger på, samles i klynger. Repoet pakker det både som en Claude Code-plugin og som en selvstændig skill, der også virker i Codex.
+The reviewers are Claude (Claude CLI), Gemini (Antigravity CLI `agy`) and Codex (native Codex CLI). They read the same stable, read-only snapshot and return JSON conforming to `schemas/review-output.schema.json`. Only schema-valid responses count as a vote, and findings that several voices point at are grouped into clusters. The repo packages this both as a Claude Code plugin and as a standalone skill that also works in Codex.
 
-Efter rapporten stopper flowet og spørger, hvilke findings der skal rettes. Intet rettes automatisk.
+After the report, the flow stops and asks which findings to fix. Nothing is fixed automatically.
 
-## Installation (Claude Code)
+## Install with `npx skills`
+
+For Codex, Gemini CLI, Cursor, OpenCode and other agents:
+
+```
+npx skills add kastruppro/llm-peer-review            # interactive: pick agents
+npx skills add kastruppro/llm-peer-review -a codex -a gemini-cli -a claude-code -y
+npx skills add kastruppro/llm-peer-review -g -a codex -y   # global (user-level)
+```
+
+The skill is self-contained (scripts, prompts, schema, references). The Claude Code plugin below adds the `/llm-peer-review:*` slash commands on top. The requirements are the same either way (see [Requirements](#requirements)): the `claude`, `agy` and `codex` CLIs, `git`, `jq` and `python3`.
+
+## Install (Claude Code plugin)
 
 ```
 /plugin marketplace add kastruppro/llm-peer-review
@@ -15,50 +27,50 @@ Efter rapporten stopper flowet og spørger, hvilke findings der skal rettes. Int
 /llm-peer-review:setup
 ```
 
-Fra en lokal klon kan du i stedet bruge stien: `/plugin marketplace add /sti/til/llm-peer-review`.
+From a local clone you can use the path instead: `/plugin marketplace add /path/to/llm-peer-review`.
 
-`/llm-peer-review:setup` kører preflight og tilbyder at installere manglende CLI'er (efter bekræftelse).
+`/llm-peer-review:setup` runs preflight and offers to install missing CLIs (after confirmation).
 
-## Brug
+## Usage
 
-| Command | Formål |
+| Command | Purpose |
 |---|---|
-| `/llm-peer-review:review [--scope auto\|working-tree\|branch\|full] [--base <ref>] [focus ...]` | Almindeligt tre-LLM review |
-| `/llm-peer-review:adversarial-review [samme argumenter]` | Udfordrer valgt implementering, design og antagelser |
-| `/llm-peer-review:setup` | Tjek og installér Claude-, `agy`- og Codex-CLI |
+| `/llm-peer-review:review [--scope auto\|working-tree\|branch\|full] [--base <ref>] [focus ...]` | Regular three-LLM review |
+| `/llm-peer-review:adversarial-review [same arguments]` | Challenges the chosen implementation, design and assumptions |
+| `/llm-peer-review:setup` | Check and install the Claude, `agy` and Codex CLIs |
 
-- `--scope auto` (default) vælger `working-tree`, når arbejdstræet er dirty, ellers branch-diff mod default branch. En mappe uden Git giver `full`.
-- Mangler repoet `origin/HEAD` og `main`/`master`/`trunk`, så brug `--base <ref>` eller `--scope full`.
-- Tekst efter flagene bliver ét quotet `--focus`-argument, aldrig spliced ind i en shell-kommando.
-- Rapporten skrives som `CODE_REVIEW_<YYYY-MM-DD>_<agent>_<model>.md` i projektroden.
+- `--scope auto` (default) picks `working-tree` when the working tree is dirty, otherwise a branch diff against the default branch. A directory without Git gives `full`.
+- If the repo has no `origin/HEAD` and no `main`/`master`/`trunk`, use `--base <ref>` or `--scope full`.
+- Text after the flags becomes a single quoted `--focus` argument, never spliced into a shell command.
+- The report is written as `CODE_REVIEW_<YYYY-MM-DD>_<agent>_<model>.md` in the project root.
 
-Eksempler:
+Examples:
 
 ```
 /llm-peer-review:review
-/llm-peer-review:review --scope branch --base main fokuser på fejlhåndtering
+/llm-peer-review:review --scope branch --base main focus on error handling
 /llm-peer-review:adversarial-review --scope full
 ```
 
-## Brug i Codex
+## Use in Codex
 
-Skill'en virker selvstændigt uden pluginet. Peg Codex på skill-mappen:
+The skill works standalone without the plugin (the quickest route is `npx skills add`, above). Alternatively, point Codex at the skill directory:
 
 ```
 plugins/llm-peer-review/skills/llm-peer-review
 ```
 
-Kopiér eller symlink den til Codex' skills-mappe og start med `$llm-peer-review` (se `agents/openai.yaml`). Indgangspunktet er `scripts/run-review.sh`; flow og regler står i `SKILL.md`.
+Copy or symlink it into Codex's skills directory and start with `$llm-peer-review` (see `agents/openai.yaml`). The entry point is `scripts/run-review.sh`; the flow and rules are in `SKILL.md`.
 
-## Krav
+## Requirements
 
-`claude`, `agy` (med login eller `ANTIGRAVITY_API_KEY`), `codex`, `git`, `jq`, `python3` (kun stdlib) og `/bin/bash` 3.2+. Modelnavne står kun i `scripts/models.json`.
+`claude`, `agy` (with login or `ANTIGRAVITY_API_KEY`), `codex`, `git`, `jq`, `python3` (stdlib only) and `/bin/bash` 3.2+. Model names live only in `scripts/models.json`.
 
-## Inspireret af
+## Inspired by
 
-- [openai/codex-plugin-cc](https://github.com/openai/codex-plugin-cc): plugin-format, commands og dele af review-prompts og skema (Apache-2.0, se `NOTICE`).
-- [antigravity-plugin-cc](https://github.com/simplybychris/antigravity-plugin-cc): idéen til `setup`-kommandoen og brugen af `agy`.
+- [openai/codex-plugin-cc](https://github.com/openai/codex-plugin-cc): plugin format, commands, and parts of the review prompts and schema (Apache-2.0, see `NOTICE`).
+- [antigravity-plugin-cc](https://github.com/simplybychris/antigravity-plugin-cc): the idea for the `setup` command and the use of `agy`.
 
-## Licens
+## License
 
-MIT (se `LICENSE`). Dele af prompts og schema stammer fra openai/codex-plugin-cc (Apache-2.0); se `NOTICE` og `LICENSES/Apache-2.0.txt`.
+MIT (see `LICENSE`). Parts of the prompts and schema come from openai/codex-plugin-cc (Apache-2.0); see `NOTICE` and `LICENSES/Apache-2.0.txt`.

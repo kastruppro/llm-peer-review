@@ -296,23 +296,23 @@ class ReviewJsonTests(unittest.TestCase):
         g = self.write("Here are my findings: src/a.py:3 bug")
         r = self.aggregate(("claude", a), ("gemini", g))
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("gemini: MANGLER (NOTJSON)", r.stdout)
+        self.assertIn("gemini: NOT COUNTED (NOTJSON)", r.stdout)
         weak = self.write(json.dumps({**CLEAN, "checked": []}))
-        self.assertIn("gemini: MANGLER (WEAK)", self.aggregate(("claude", a), ("gemini", weak)).stdout)
+        self.assertIn("gemini: NOT COUNTED (WEAK)", self.aggregate(("claude", a), ("gemini", weak)).stdout)
         err = self.write('{"is_error":true,"result":"x"}')
-        self.assertIn("gemini: MANGLER (ERROR)", self.aggregate(("claude", a), ("gemini", err)).stdout)
+        self.assertIn("gemini: NOT COUNTED (ERROR)", self.aggregate(("claude", a), ("gemini", err)).stdout)
 
     def test_aggregate_missing_file_does_not_crash(self):
         a = self.write(json.dumps(rev(f("a.py", 1))))
         r = self.aggregate(("claude", a), ("codex", str(Path(self.tmp.name) / "nope")))
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("codex: MANGLER (MISSING)", r.stdout)
+        self.assertIn("codex: NOT COUNTED (MISSING)", r.stdout)
         self.assertIn("a.py:1-1", r.stdout)
 
     def test_aggregate_weak_voice_findings_are_excluded(self):
         weak = self.write(json.dumps({**rev(f("a.py", 1)), "checked": []}))
         r = self.aggregate(("claude", weak))
-        self.assertIn("claude: MANGLER (WEAK)", r.stdout)
+        self.assertIn("claude: NOT COUNTED (WEAK)", r.stdout)
         self.assertNotIn("a.py:1", r.stdout)
 
     def test_aggregate_usage_errors(self):

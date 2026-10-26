@@ -2,3 +2,5 @@
 __pycache__/
 *.pyc
 .claude/scheduled_tasks.lock
+# Code reviews are local artifacts; never commit them
+CODE_REVIEW_*.md

@@ -86,7 +86,7 @@ def default_branch(root):
             return cand
         if _git(root, "show-ref", "--verify", "--quiet", "refs/remotes/origin/" + cand, check=False).returncode == 0:
             return "origin/" + cand
-    raise ValueError("Kan ikke finde default branch; brug --base <ref> eller --scope full")
+    raise ValueError("Cannot find the default branch; use --base <ref> or --scope full")
 
 
 def _usable_ref(root, name):
@@ -100,13 +100,13 @@ def _usable_ref(root, name):
 
 def resolve_target(root, scope, base):
     if scope not in SCOPES:
-        raise ValueError("Ukendt scope %r; brug auto, working-tree, branch eller full" % scope)
+        raise ValueError("Unknown scope %r; use auto, working-tree, branch or full" % scope)
     if base and scope in ("working-tree", "full"):
-        raise ValueError("--base kan ikke kombineres med --scope %s; brug --scope branch eller auto" % scope)
+        raise ValueError("--base cannot be combined with --scope %s; use --scope branch or auto" % scope)
     if not _is_git_repo(root):
         if scope in ("auto", "full"):
             return {"mode": "full", "label": "full tree (no git repository)", "base_ref": None}
-        raise ValueError("%s kræver et Git-repo; brug --scope full eller --scope auto" % scope)
+        raise ValueError("%s requires a Git repository; use --scope full or --scope auto" % scope)
     if scope == "full":
         return {"mode": "full", "label": "full tree", "base_ref": None}
     if base:
@@ -119,7 +119,7 @@ def resolve_target(root, scope, base):
         return {"mode": "working-tree", "label": "working tree diff", "base_ref": None}
     ref = _usable_ref(root, default_branch(root))
     if not _ref_exists(root, ref):
-        raise ValueError("Default branch %r findes ikke som ref; brug --base <ref> eller --scope full" % ref)
+        raise ValueError("Default branch %r does not exist as a ref; use --base <ref> or --scope full" % ref)
     return {"mode": "branch", "label": "branch diff against %s" % ref, "base_ref": ref}
 
 
@@ -151,7 +151,7 @@ def write_diff(root, target, path):
             raise ValueError("git diff %s fejlede: %s" % (spec, (e.stderr or "").strip()))
         files = list(dict.fromkeys(names))
     else:
-        raise ValueError("write_diff kræver en diff-mode, ikke %r" % mode)
+        raise ValueError("write_diff requires a diff mode, not %r" % mode)
     with open(path, "w", errors="surrogateescape") as fh:
         fh.write(body)
     return files
@@ -209,7 +209,7 @@ def main(argv=None):
     try:
         root = os.path.realpath(a.root)
         if not os.path.isdir(root):
-            raise ValueError("--root er ikke en mappe: %s" % a.root)
+            raise ValueError("--root is not a directory: %s" % a.root)
         out = os.path.realpath(a.out)
         os.makedirs(out, mode=0o700, exist_ok=True)
         target = resolve_target(root, a.scope, a.base)
@@ -224,7 +224,7 @@ def main(argv=None):
             files = write_diff(root, target, diff_path)
             if not files:
                 os.remove(diff_path)
-                print("Intet at reviewe i %s; brug --scope full eller --base <ref>" % target["label"],
+                print("Nothing to review in %s; use --scope full or --base <ref>" % target["label"],
                       file=sys.stderr)
                 return 3
         name = "adversarial-review.md" if a.adversarial else "review.md"
@@ -245,7 +245,7 @@ def main(argv=None):
         print("git fejlede: %s" % ((e.stderr or "").strip() or "exit %d" % e.returncode), file=sys.stderr)
         return 2
     except OSError as e:
-        print("Kunne ikke køre git eller skrive output: %s" % e, file=sys.stderr)
+        print("Could not run git or write output: %s" % e, file=sys.stderr)
         return 2
 
 

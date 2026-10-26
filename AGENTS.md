@@ -1,12 +1,12 @@
 # llm-peer-review
 
-Skill og Claude Code-plugin, der kører tre uafhængige, parallelle code reviews (Claude, Gemini, Codex) og aggregerer kun gyldige stemmer.
+A skill and Claude Code plugin that runs three independent, parallel code reviews (Claude, Gemini, Codex) and aggregates only valid votes.
 
 ## Layout
 
-- `plugins/llm-peer-review/skills/llm-peer-review/` (`SK`): skill'en
+- `plugins/llm-peer-review/skills/llm-peer-review/` (`SK`): the skill
   - `SKILL.md`, `agents/openai.yaml` (Codex), `references/`, `scripts/`, `schemas/`
-  - `scripts/models.json`: eneste sted med modelnavne
+  - `scripts/models.json`: the only place with model names
 
 ## Test
 
@@ -14,9 +14,9 @@ Skill og Claude Code-plugin, der kører tre uafhængige, parallelle code reviews
 cd plugins/llm-peer-review/skills/llm-peer-review/scripts && for t in test-*.sh; do bash "$t" || exit 1; done && for p in test-*.py; do python3 "$p" || exit 1; done
 ```
 
-## Regler
+## Rules
 
-- Modelnavne må kun stå i `scripts/models.json`.
-- Originalen i `<original triplereview skill>` må aldrig ændres.
-- Kun Python-stdlib; bash-scripts skal virke i `/bin/bash` 3.2.
-- SKILL.md, references og commands på dansk; reviewer-prompts på engelsk.
+- Model names may only appear in `scripts/models.json`.
+- The original in `<original triplereview skill>` must never be modified.
+- Python stdlib only; bash scripts must work in `/bin/bash` 3.2.
+- All documentation, commands and prompts are in English.

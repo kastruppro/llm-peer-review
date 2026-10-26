@@ -1,119 +1,120 @@
 ---
 name: llm-peer-review
 description: >-
-  Kør tre uafhængige, parallelle LLM-reviews (Claude, Gemini, Codex) af et diff,
-  en branch eller hele kodebasen, valider hvert svar mod et JSON-skema, og
-  aggregér kun gyldige stemmer til en evidensbaseret konsensus. Brug når
-  brugeren beder om triple review, tre-LLM review, diff- eller branch-review,
-  adversarial review, en grundig pre-merge audit eller en uafhængig
-  multi-model vurdering før eventuelle rettelser.
+  Run three independent, parallel LLM reviews (Claude, Gemini, Codex) of a diff,
+  a branch or the whole codebase, validate each response against a JSON schema,
+  and aggregate only valid voices into an evidence-based consensus. Use for LLM
+  peer review, cross-model code review, triple review, three-LLM review, diff or
+  branch review, adversarial review, a thorough pre-merge audit, or an
+  independent multi-model review before any fixes are made.
 ---
 
 # LLM peer review
 
-Tre reviewere (Claude CLI, Gemini via Antigravity CLI `agy`, native Codex CLI)
-læser det samme stabile snapshot og returnerer JSON efter
-`schemas/review-output.schema.json`. `scripts/run-review.sh` er det eneste
-indgangspunkt: preflight, scope, parallel kørsel, watcher, read-only-kontrol,
-klassifikation og aggregering. Launch-flag og modeller står kun i scripts og
-`scripts/models.json`; opfind aldrig egne kald.
+Three reviewers (Claude CLI, Gemini via Antigravity CLI `agy`, native Codex CLI)
+read the same stable snapshot and return JSON conforming to
+`schemas/review-output.schema.json`. `scripts/run-review.sh` is the only entry
+point: preflight, scope, parallel run, watcher, read-only check, classification
+and aggregation. Launch flags and models live only in the scripts and
+`scripts/models.json`; never invent your own invocations.
 
-## 1. Ufravigelige regler
+## 1. Inviolable rules
 
-1. Ændr ikke projektfiler, git-state eller instruktioner, mens reviewerne kører.
-2. Giv alle stemmer samme scope og samme kerneprompt.
-3. Kun schema-gyldige `VALID`/`CLEAN` tæller som stemme. Tavshed og fejl er ikke enighed.
-4. Verificér single-reviewer findings direkte i kildekoden før de accepteres.
-5. Ret kun kode efter aggregering, og kun hvis brugeren vælger det (regel 7).
-6. Reviewerne er read-only. Gemini har kun workflow-baseret read-only, så
-   indholdsmanifestet før/efter (exit `4`) er obligatorisk.
-7. Efter rapporten: STOP og spørg brugeren, hvilke findings der skal rettes.
-   Ret aldrig automatisk, heller ikke når rettelsen er oplagt.
+1. Do not change project files, git state or instructions while the reviewers run.
+2. Give all voices the same scope and the same core prompt.
+3. Only schema-valid `VALID`/`CLEAN` verdicts count as a voice. Silence and errors are not agreement.
+4. Verify single-reviewer findings directly in the source code before accepting them.
+5. Fix code only after aggregation, and only if the user chooses to (rule 7).
+6. The reviewers are read-only. Gemini has only workflow-based read-only, so the
+   before/after content manifest (exit `4`) is mandatory.
+7. After the report: STOP and ask the user which findings to fix.
+   Never fix automatically, even when the fix is obvious.
 
-Brug ikke skill'en til små diffs, lint/style eller en kodebase, der aktivt
-ændres. En enkelt reviewer er billigere dér.
+Do not use the skill for small diffs, lint/style, or a codebase that is being
+actively changed. A single reviewer is cheaper there.
 
-## 2. Vælg scope og mode
+## 2. Choose scope and mode
 
-Default er `--scope auto`: dirty arbejdstræ giver `working-tree`, ellers
-branch-diff mod default branch; uden Git bliver det `full`.
+The default is `--scope auto`: a dirty working tree gives `working-tree`,
+otherwise a branch diff against the default branch; without Git it becomes `full`.
 
-| Brugeren vil | Flags |
+| The user wants | Flags |
 |---|---|
-| review af det jeg har ændret / "review" uden mere | ingen (`auto`) |
-| kun ucommittede ændringer | `--scope working-tree` |
-| hele branchen / PR mod en bestemt base | `--scope branch --base <ref>` |
-| hele kodebasen, pre-merge audit | `--scope full` |
-| udfordr design og antagelser | `--adversarial` |
-| styr opmærksomheden | `--focus "$FOCUS"` (ét argument, se nedenfor) |
-| kun nogle stemmer | `--voices claude,codex` |
+| review of what I changed / plain "review" | none (`auto`) |
+| uncommitted changes only | `--scope working-tree` |
+| the whole branch / PR against a specific base | `--scope branch --base <ref>` |
+| the whole codebase, pre-merge audit | `--scope full` |
+| challenge design and assumptions | `--adversarial` |
+| steer attention | `--focus "$FOCUS"` (a single argument, see below) |
+| only some voices | `--voices claude,codex` |
 
-Fokustekst er data, aldrig kode. Dobbelte anførselstegn udvider stadig `$(...)`,
-backticks og `$VAR`, så læg teksten ordret i en variabel via en quotet heredoc og
-send den som ét argument; den udføres eller fortolkes aldrig:
+Focus text is data, never code. Double quotes still expand `$(...)`, backticks
+and `$VAR`, so put the text verbatim in a variable via a quoted heredoc and pass
+it as a single argument; it is never executed or interpreted:
 
 ```bash
 FOCUS=$(cat <<'PEER_FOCUS_EOF'
-<fokustekst ordret>
+<focus text verbatim>
 PEER_FOCUS_EOF
 )
 # ... --focus "$FOCUS"
 ```
 
-Indeholder teksten en linje identisk med afgrænseren (`PEER_FOCUS_EOF`), så vælg en
-anden, unik afgrænser (fx med tilfældige tegn tilføjet), som ikke findes i teksten.
-Fjern eller ændr aldrig fokusteksten.
+If the text contains a line identical to the delimiter (`PEER_FOCUS_EOF`), choose
+a different, unique delimiter (e.g. with random characters appended) that does
+not occur in the text. Never remove or alter the focus text.
 
-`--scope` skal være `auto|working-tree|branch|full`, og `--base` et almindeligt
-ref-navn uden mellemrum eller shell-metategn (ellers spørg brugeren). `--base`
-kan kun kombineres med `auto` eller `branch`; med `working-tree` eller `full`
-giver det exit `2`.
+`--scope` must be `auto|working-tree|branch|full`, and `--base` a plain ref name
+without spaces or shell metacharacters (otherwise ask the user). `--base` can
+only be combined with `auto` or `branch`; with `working-tree` or `full` it
+gives exit `2`.
 
-Mangler repoet `origin/HEAD` og `main`/`master`/`trunk`, fejler `auto` på et
-rent træ med besked om `--base` eller `--scope full`. Vælg da en af dem.
+If the repo has no `origin/HEAD` and no `main`/`master`/`trunk`, `auto` on a
+clean tree fails with a message about `--base` or `--scope full`. Choose one of them.
 
-## 3. Kør
+## 3. Run
 
-`SKILL_DIR` er den absolutte mappe med denne `SKILL.md`; `PROJECT_ROOT` er
-`pwd -P` for projektet (stier med mellemrum er understøttet, quote altid):
+`SKILL_DIR` is the absolute directory containing this `SKILL.md`; `PROJECT_ROOT`
+is `pwd -P` for the project (paths with spaces are supported, always quote):
 
 ```bash
 bash "$SKILL_DIR/scripts/run-review.sh" --root "$PROJECT_ROOT" [flags]
 ```
 
-- **Claude Code:** `Bash` med `run_in_background: true` og `timeout: 2400000`.
-  Fortæl brugeren, at reviewet kører (watcherens grænse er 35 min), og rør ikke projektet.
-  Læs resultatet, når baggrundskørslen melder færdig.
-- **Codex:** kør i forgrunden med lang yield; send korte statusbeskeder.
+- **Claude Code:** `Bash` with `run_in_background: true` and `timeout: 2400000`.
+  Tell the user the review is running (the watcher limit is 35 min), and do not touch the project.
+  Read the result when the background run reports completion.
+- **Codex:** run in the foreground with a long yield; send short status messages.
 
-Første stdout-linje er `REVIEW_DIR=<sti>`; senere kommer `TARGET=…`, verdicts og
-`AGGREGATE=<sti>/aggregate.md`. Scriptet sletter aldrig run-mappen.
+The first stdout line is `REVIEW_DIR=<path>`; later come `TARGET=...`, verdicts and
+`AGGREGATE=<path>/aggregate.md`. The script never deletes the run directory.
 
-| Exit | Betydning | Handling |
+| Exit | Meaning | Action |
 |---|---|---|
-| `0` | alle valgte stemmer `VALID`/`CLEAN` | gå til §5 |
-| `1` | mindst én stemme mangler/er ugyldig; `aggregate.md` findes | §4, derefter §5 |
-| `2` | preflight, wiring, watcher-fejl eller timeout; ingen aggregering | læs stderr, ret årsagen ([troubleshooting](references/troubleshooting.md)) |
-| `3` | intet at reviewe | foreslå `--scope full` eller `--base <ref>` |
-| `4` | projektet eller `shared/` (diff/prompt) ændrede sig under kørslen; ingen aggregering | find årsagen, kør alle stemmer igen på et stabilt snapshot |
-| `130`/`143` | afbrudt; stemmerne er stoppet | spørg brugeren, om der skal køres igen |
+| `0` | all selected voices `VALID`/`CLEAN` | go to §5 |
+| `1` | at least one voice is missing/invalid; `aggregate.md` exists | §4, then §5 |
+| `2` | preflight, wiring, watcher failure or timeout; no aggregation | read stderr, fix the cause ([troubleshooting](references/troubleshooting.md)) |
+| `3` | nothing to review (`Nothing to review in <label>; use --scope full or --base <ref>`) | suggest `--scope full` or `--base <ref>` |
+| `4` | the project or `shared/` (diff/prompt) changed during the run; no aggregation | find the cause, rerun all voices on a stable snapshot |
+| `130`/`143` | interrupted; the voices are stopped | ask the user whether to rerun |
 
-Watcher-grænser kan justeres med `REVIEW_POLL_INTERVAL`, `REVIEW_MAX_ITER` og
-`REVIEW_STALE_ITERS` (se headeren i `run-review.sh`).
+Watcher limits can be tuned with `REVIEW_POLL_INTERVAL`, `REVIEW_MAX_ITER` and
+`REVIEW_STALE_ITERS` (see the header of `run-review.sh`).
 
-## 4. Ved manglende voice
+## 4. When a voice is missing
 
-Læs `verdicts.txt` i run-mappen og fejlårsagen i stemmens `.err` (se
-[troubleshooting](references/troubleshooting.md)). Relaunch højst én gang pr.
-stemme, med samme scope/`--base`/`--focus`/`--adversarial` og kun den manglende
-voice. Det giver en ny run-mappe:
+Read `verdicts.txt` in the run directory and the failure cause in the voice's
+`.err` (see [troubleshooting](references/troubleshooting.md)). Relaunch at most
+once per voice, with the same scope/`--base`/`--focus`/`--adversarial` and only
+the missing voice. This produces a new run directory:
 
 ```bash
-bash "$SKILL_DIR/scripts/run-review.sh" --root "$PROJECT_ROOT" --voices gemini [samme flags]
+bash "$SKILL_DIR/scripts/run-review.sh" --root "$PROJECT_ROOT" --voices gemini [same flags]
 ```
 
-Kræv derefter, at projektet var uændret mellem de to runs, og aggregér på tværs
-(`OLD`/`NEW` er de to `REVIEW_DIR`, `*_RID` er mappernes basename):
+Then require that the project was unchanged between the two runs, and aggregate
+across them (`OLD`/`NEW` are the two `REVIEW_DIR`s, `*_RID` are the directories'
+basenames):
 
 ```bash
 diff -u "$OLD/snapshot.before.json" "$NEW/snapshot.before.json" \
@@ -123,54 +124,57 @@ diff -u "$OLD/snapshot.before.json" "$NEW/snapshot.before.json" \
        codex="$OLD/review_codex_$OLD_RID.last.md"
 ```
 
-Ikke-tom diff betyder, at runs ikke kan blandes: kør alle stemmer igen. En
-stemme, der stadig ikke er gyldig efter ét relaunch, står som manglende (en
-fil, der ikke findes, giver `MANGLER (MISSING)`). Erstat aldrig familien med en
-anden model.
+A non-empty diff means the runs cannot be mixed: rerun all voices. A voice that
+is still not valid after one relaunch is reported as `NOT COUNTED (<class>)` (a
+file that does not exist gives `NOT COUNTED (MISSING)`, a schema-invalid response
+`NOT COUNTED (WEAK)`). Never substitute the family with a different model.
 
-## 5. Verificér
+## 5. Verify
 
-Læs hver klynge i `aggregate.md` mod kildekoden, ikke kun beskrivelsen.
-`aggregate.md` har kun titler. Body, recommendation og reviewernes markeringer af
-inferens og usikkerhed står i `review_<voice>_<RID>.extracted.json` i run-mappen
-(det normaliserede JSON-svar pr. stemme); læs dem dér.
+Read each cluster in `aggregate.md` against the source code, not just the
+description. `aggregate.md` has titles only. Body, recommendation and the
+reviewers' markers of inference and uncertainty are in
+`review_<voice>_<RID>.extracted.json` in the run directory (the normalized JSON
+response per voice); read them there.
 
-Scriptet grupperer kun efter sti og nærhed: en finding kommer i en klynge, når
-dens linjer ligger inden for ±3 linjer af klyngens første finding, aldrig to
-findings fra samme stemme, og en finding over 40 linjer slås kun sammen med en
-lige så bred finding fra en anden stemme, hvis start og slut ligger inden for ±3.
-Nærhed er ikke det samme som enighed.
+The script groups only by path and proximity: a finding joins a cluster when its
+lines are within ±3 lines of the cluster's first finding, never two findings from
+the same voice, and a finding over 40 lines is merged only with an equally wide
+finding from another voice whose start and end are within ±3. Proximity is not
+the same as agreement.
 
-- En klynge med mere end ét særskilt problem skal splittes; stemmer tæller kun,
-  når de beskriver samme defekt.
-- Klynger med flere stemmer om samme defekt: konsensus, men bekræft stadig stedet.
-- Klynger med én stemme: bekræft eller afvis med konkret evidens (kode, kald, test).
-- Semantisk ens klynger, som scriptet ikke slog sammen (andre linjer/ordlyd), flettes.
-- `CLEAN` er en gyldig nul-finding-stemme, ikke en finding.
+- A cluster with more than one distinct problem must be split; voices count only
+  when they describe the same defect.
+- Clusters with several voices on the same defect: consensus, but still confirm the location.
+- Single-voice clusters: confirm or reject with concrete evidence (code, calls, tests).
+- Semantically identical clusters that the script did not merge (different lines/wording) are merged.
+- `CLEAN` is a valid zero-finding vote, not a finding.
 
-## 6. Rapportér
+## 6. Report
 
-Skriv `CODE_REVIEW_<YYYY-MM-DD>_<agent>_<model>.md` i projektroden. Agent og
-model er orkestratorens egne, med små bogstaver, mellemrum erstattet af `_` og
-versionspunktummer bevaret (fx `CODE_REVIEW_2026-10-24_claude_opus_5.5.md`).
+Write `CODE_REVIEW_<YYYY-MM-DD>_<agent>_<model>.md` in the project root. Agent and
+model are the orchestrator's own, in lowercase, spaces replaced by `_` and
+version dots kept (e.g. `CODE_REVIEW_2026-10-24_claude_opus_5.5.md`). The file is
+a local artifact: it must not be committed (it is git-ignored in this repo; in
+other projects, do not `git add` it unless the user asks).
 
-- Manglende voices øverst: familie, sidste verdict og årsag; skriv at tilliden er lavere.
-- Findings først, sorteret efter severity (critical, high, medium, low), med
-  disposition (accepteret/afvist) og evidens.
-- `file:line` ordret som reviewerne rapporterede, og bevar markeringer af
-  inferens, usikkerhed og åbne spørgsmål (fra `review_<voice>_<RID>.extracted.json`).
-  Ingen nye findings uden kilde.
-- Ingen findings: sig det eksplicit og hold restrisiko kort.
+- Missing voices at the top: family, last verdict and cause; state that confidence is lower.
+- Findings first, sorted by severity (critical, high, medium, low), with
+  disposition (accepted/rejected) and evidence.
+- `file:line` verbatim as the reviewers reported it, and preserve markers of
+  inference, uncertainty and open questions (from `review_<voice>_<RID>.extracted.json`).
+  No new findings without a source.
+- No findings: say so explicitly and keep residual risk brief.
 
-Gentag indholdet i svaret og STOP derefter. Spørg, hvilke findings der skal
-rettes (AskUserQuestion i Claude Code; ellers en direkte spørgsmålsbesked).
-Rør ingen filer, før brugeren har svaret.
+Repeat the contents in your reply and then STOP. Ask which findings to fix
+(AskUserQuestion in Claude Code; otherwise a direct question message).
+Touch no files until the user has answered.
 
-## 7. Ryd op
+## 7. Clean up
 
-Run-mappen ligger uden for projektet. Ryd kun mappen, dette flow selv oprettede,
-og først når rapporten er skrevet (og eventuelle rå outputs er gemt efter
-brugerens ønske):
+The run directory is outside the project. Clean up only the directory this flow
+itself created, and only after the report is written (and any raw outputs are
+saved as the user wishes):
 
 ```bash
 if [ -f "$REVIEW_DIR/.llm-peer-review-owned" ]; then
@@ -180,11 +184,11 @@ else
 fi
 ```
 
-## Ressourcer
+## Resources
 
-- `scripts/run-review.sh`: indgangspunkt, flags, exitkoder, run-mappens layout.
-- `scripts/review_json.py`, `scripts/classify-review.sh`: schema-validering, verdicts, aggregering.
-- `scripts/models.json`: eneste sted med modelnavne.
-- `prompts/review.md`, `prompts/adversarial-review.md`: reviewer-prompts (engelsk).
-- [references/hardening.md](references/hardening.md): isolation, målt CLI-adfærd, rationale.
-- [references/troubleshooting.md](references/troubleshooting.md): verdicts og fejl.
+- `scripts/run-review.sh`: entry point, flags, exit codes, run directory layout.
+- `scripts/review_json.py`, `scripts/classify-review.sh`: schema validation, verdicts, aggregation.
+- `scripts/models.json`: the only place with model names.
+- `prompts/review.md`, `prompts/adversarial-review.md`: reviewer prompts (English).
+- [references/hardening.md](references/hardening.md): isolation, measured CLI behavior, rationale.
+- [references/troubleshooting.md](references/troubleshooting.md): verdicts and failures.

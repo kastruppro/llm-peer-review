@@ -1,23 +1,23 @@
 ---
-description: Tjek om Claude-, Gemini- (agy) og Codex-CLI'erne er klar til peer review, og tilbyd installation hvis noget mangler
+description: Check whether the Claude, Gemini (agy) and Codex CLIs are ready for peer review, and offer to install anything missing
 disable-model-invocation: true
 allowed-tools: Bash, Read, Glob, Grep, AskUserQuestion
 ---
 
-Kør:
+Run:
 
 ```bash
 bash "${CLAUDE_PLUGIN_ROOT}/skills/llm-peer-review/scripts/preflight.sh" check
 ```
 
-`preflight.sh check` afslutter med exit 1, når noget er `MISSING`. Det er forventet og ikke en kommandofejl.
+`preflight.sh check` exits with 1 when anything is `MISSING`. This is expected and not a command failure.
 
-Videregiv outputtet til brugeren uændret (én linje pr. komponent, `ok` eller `MISSING …`).
+Pass the output on to the user unchanged (one line per component, `ok` or `MISSING ...`).
 
-Er alt `ok`, så sig kort, at peer review er klar. Ellers, for hver `MISSING`-linje, foreslå rettelsen og installér kun efter bekræftelse:
+If everything is `ok`, say briefly that peer review is ready. Otherwise, for each `MISSING` line, suggest the fix and install only after confirmation:
 
-- Brug `AskUserQuestion` én gang pr. manglende komponent med to valg: installér (`(Recommended)` på det første) eller `Spring over`. Installér aldrig uden at brugeren har bekræftet.
-- `agy` (Gemini via Antigravity CLI), officiel installer:
+- Use `AskUserQuestion` once per missing component with two options: install (`(Recommended)` on the first) or `Skip`. Never install without the user's confirmation.
+- `agy` (Gemini via Antigravity CLI), official installer:
   ```bash
   curl -fsSL https://antigravity.google/cli/install.sh | bash
   ```
@@ -25,7 +25,7 @@ Er alt `ok`, så sig kort, at peer review er klar. Ellers, for hver `MISSING`-li
   ```bash
   npm install -g @openai/codex
   ```
-- Authentication: bed brugeren køre CLI'en interaktivt én gang (`!agy` for Gemini, `!codex login` for Codex), så login gemmes. Kør ikke login for brugeren.
-- Mangler en anden komponent (fx `claude`, `python3`, `jq`), forklar hvad der mangler og hvordan det typisk installeres, men installér ikke uopfordret.
+- Authentication: ask the user to run the CLI interactively once (`!agy` for Gemini, `!codex login` for Codex) so the login is saved. Do not run the login for the user.
+- If another component is missing (e.g. `claude`, `python3`, `jq`), explain what is missing and how it is typically installed, but do not install it unprompted.
 
-Efter en installation, kør preflight-kommandoen igen og vis det nye output. Blev installationen sprunget over, så vis det oprindelige output og nævn, at reviews med de manglende stemmer fejler, indtil de er installeret (`--voices` kan vælge de stemmer, der er klar).
+After an installation, run the preflight command again and show the new output. If the installation was skipped, show the original output and mention that reviews with the missing voices will fail until they are installed (`--voices` can select the voices that are ready).

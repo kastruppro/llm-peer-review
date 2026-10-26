@@ -225,22 +225,22 @@ def _cell(text):
 
 
 def _aggregate(root, specs):
-    """Markdown report for (voice, file) pairs; a voice that is not VALID/CLEAN is MANGLER."""
+    """Markdown report for (voice, file) pairs; a voice that is not VALID/CLEAN is NOT COUNTED."""
     lines, usable = [], {}
     for voice, path in specs:
         if not os.path.exists(path):
-            status = "MANGLER (MISSING)"
+            status = "NOT COUNTED (MISSING)"
         else:
             try:
                 review = load_review(path)
             except ReviewError as exc:
-                status = "MANGLER (%s)" % ("ERROR" if exc.kind == "error" else "NOTJSON")
+                status = "NOT COUNTED (%s)" % ("ERROR" if exc.kind == "error" else "NOTJSON")
             else:
                 word = classify(review)
                 if word in ("VALID", "CLEAN"):
                     status, usable[voice] = word, review
                 else:
-                    status = f"MANGLER ({word})"
+                    status = f"NOT COUNTED ({word})"
         lines.append(f"- {voice}: {status}")
     lines += ["", "| # | Severity | Location | Voices | Conf | Titles |", "|---|---|---|---|---|---|"]
     for n, c in enumerate(cluster(usable, root), 1):

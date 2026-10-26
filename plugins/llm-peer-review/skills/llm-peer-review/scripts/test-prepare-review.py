@@ -93,7 +93,7 @@ class ScopeTests(Base):
         r = self.cli()
         self.assertEqual(r.returncode, 3, r.stderr)
         self.assertIn("--scope full", r.stderr)
-        self.assertIn("Intet at reviewe i", r.stderr)
+        self.assertIn("Nothing to review in", r.stderr)
 
     def test_explicit_base(self):
         self.init_repo()
