@@ -17,6 +17,5 @@ cd plugins/llm-peer-review/skills/llm-peer-review/scripts && for t in test-*.sh;
 ## Rules
 
 - Model names may only appear in `scripts/models.json`.
-- The original in `<original triplereview skill>` must never be modified.
 - Python stdlib only; bash scripts must work in `/bin/bash` 3.2.
 - All documentation, commands and prompts are in English.

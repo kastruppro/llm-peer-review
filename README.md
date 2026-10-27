@@ -1,5 +1,7 @@
 # llm-peer-review
 
+![License](https://img.shields.io/badge/License-MIT-green)
+
 Three independent LLM reviews of the same code, aggregated into an evidence-based consensus.
 
 The reviewers are Claude (Claude CLI), Gemini (Antigravity CLI `agy`) and Codex (native Codex CLI). They read the same stable, read-only snapshot and return JSON conforming to `schemas/review-output.schema.json`. Only schema-valid responses count as a vote, and findings that several voices point at are grouped into clusters. The repo packages this both as a Claude Code plugin and as a standalone skill that also works in Codex.

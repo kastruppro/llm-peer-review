@@ -155,8 +155,9 @@ the same as agreement.
 Write `CODE_REVIEW_<YYYY-MM-DD>_<agent>_<model>.md` in the project root. Agent and
 model are the orchestrator's own, in lowercase, spaces replaced by `_` and
 version dots kept (e.g. `CODE_REVIEW_2026-10-24_claude_opus_5.5.md`). The file is
-a local artifact: it must not be committed (it is git-ignored in this repo; in
-other projects, do not `git add` it unless the user asks).
+a local artifact and must never be committed: never `git add` it. Keep it out of
+git with a global ignore (`CODE_REVIEW_*.md` in `~/.config/git/ignore`), not with a
+repo `.gitignore`.
 
 - Missing voices at the top: family, last verdict and cause; state that confidence is lower.
 - Findings first, sorted by severity (critical, high, medium, low), with
